@@ -376,6 +376,10 @@ impl App {
                 return AppCommand::Noop;
             }
             UiCommand::OpenMenu => return AppCommand::Noop,
+            UiCommand::NetworkInterfaceChanged(index) => {
+                self.show_notice(format!("Network interface: {}", index + 1));
+                return AppCommand::Noop;
+            }
             UiCommand::Scroll(panel, amount) => {
                 self.ui.scroll_by(panel, amount);
                 return AppCommand::Noop;

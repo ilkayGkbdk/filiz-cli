@@ -76,6 +76,7 @@ pub enum UiCommand {
     DensityChanged(LayoutDensity),
     Scroll(Panel, i16),
     OpenMenu,
+    NetworkInterfaceChanged(usize),
     Noop,
 }
 
@@ -87,6 +88,7 @@ pub struct UiState {
     pub scroll_offsets: HashMap<Panel, u16>,
     pub menu_open: bool,
     pub theme: Theme,
+    pub network_interface: usize,
 }
 
 impl Default for UiState {
@@ -98,6 +100,7 @@ impl Default for UiState {
             scroll_offsets: HashMap::new(),
             menu_open: false,
             theme: Theme::Forest,
+            network_interface: 0,
         }
     }
 }
@@ -142,6 +145,14 @@ impl UiState {
             }
             KeyCode::PageUp => UiCommand::Scroll(focused, -8),
             KeyCode::PageDown => UiCommand::Scroll(focused, 8),
+            KeyCode::Up if self.workspace == Workspace::Network => {
+                self.network_interface = self.network_interface.saturating_sub(1);
+                UiCommand::NetworkInterfaceChanged(self.network_interface)
+            }
+            KeyCode::Down if self.workspace == Workspace::Network => {
+                self.network_interface = self.network_interface.saturating_add(1);
+                UiCommand::NetworkInterfaceChanged(self.network_interface)
+            }
             _ => UiCommand::Noop,
         }
     }

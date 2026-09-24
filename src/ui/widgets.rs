@@ -327,6 +327,11 @@ pub fn network(frame: &mut Frame, area: Rect, app: &App) {
         .as_ref()
         .map(|snapshot| snapshot.network_summaries.as_slice())
         .unwrap_or(&[]);
+    let selected = summaries.get(
+        app.ui
+            .network_interface
+            .min(summaries.len().saturating_sub(1)),
+    );
     let sections = Layout::vertical([
         Constraint::Length(6),
         Constraint::Length(7),
@@ -335,17 +340,19 @@ pub fn network(frame: &mut Frame, area: Rect, app: &App) {
     .split(area);
     let columns = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(sections[0]);
-    let (download, upload) = summaries.iter().fold((0.0, 0.0), |(down, up), item| {
-        (
-            down + item.download_rate.unwrap_or(0.0),
-            up + item.upload_rate.unwrap_or(0.0),
-        )
-    });
+    let (download, upload) = selected
+        .map(|item| {
+            (
+                item.download_rate.unwrap_or(0.0),
+                item.upload_rate.unwrap_or(0.0),
+            )
+        })
+        .unwrap_or((0.0, 0.0));
     network_card(
         frame,
         columns[0],
         "DOWNLOAD",
-        rate_or_na(if summaries.is_empty() {
+        rate_or_na(if selected.is_none() {
             None
         } else {
             Some(download)
@@ -358,7 +365,7 @@ pub fn network(frame: &mut Frame, area: Rect, app: &App) {
         frame,
         columns[1],
         "UPLOAD",
-        rate_or_na(if summaries.is_empty() {
+        rate_or_na(if selected.is_none() {
             None
         } else {
             Some(upload)
@@ -392,7 +399,12 @@ pub fn network(frame: &mut Frame, area: Rect, app: &App) {
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" NETWORK / DOWNLOAD ")
+            .title(format!(
+                " NETWORK / DOWNLOAD  {} ",
+                selected
+                    .map(|item| item.interface.as_str())
+                    .unwrap_or("N/A")
+            ))
             .title_style(Style::default().fg(palette.olive))
             .border_style(Style::default().fg(palette.border))
             .style(Style::default().bg(palette.panel)),
@@ -401,8 +413,7 @@ pub fn network(frame: &mut Frame, area: Rect, app: &App) {
     .column_spacing(1);
     frame.render_widget(table, sections[1]);
 
-    let all_connections = summaries
-        .first()
+    let all_connections = selected
         .map(|summary| summary.connections.as_slice())
         .unwrap_or(&[]);
     let connection_offset = app
