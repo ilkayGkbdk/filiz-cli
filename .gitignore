@@ -1,0 +1,15 @@
+/target/
+.DS_Store
+.superpowers/
+
+# Editors and IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example

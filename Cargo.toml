@@ -1,0 +1,16 @@
+[package]
+name = "filiz"
+version = "0.1.0"
+edition = "2021"
+description = "An early private macOS system monitor for the terminal"
+license = "MIT"
+
+[[bin]]
+name = "filiz"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+crossterm = "0.28"
+ratatui = "0.29"
+sysinfo = "0.32"
