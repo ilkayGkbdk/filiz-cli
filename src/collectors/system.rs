@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use sysinfo::{Disks, Networks, System};
 
-use crate::model::{CollectorResult, CollectorWarning, ResourceMetric};
+use crate::model::{CollectorData, CollectorResult, CollectorWarning, ResourceMetric};
 
 use super::Collector;
 
@@ -48,7 +48,7 @@ impl Default for SystemCollector {
 
 impl Collector for SystemCollector {
     fn collect(&mut self) -> CollectorResult {
-        let mut result = CollectorResult::default();
+        let mut result = CollectorData::default();
         self.system.refresh_cpu_usage();
         self.system.refresh_memory();
         self.disks.refresh_list();
@@ -157,11 +157,11 @@ impl Collector for SystemCollector {
         }
         self.previous_networks = current_networks;
         self.previous_at = Some(now);
-        result
+        Ok(result)
     }
 }
 
-fn metric(result: &mut CollectorResult, name: &str, value: Option<f64>, unit: &str) {
+fn metric(result: &mut CollectorData, name: &str, value: Option<f64>, unit: &str) {
     result.metrics.push(ResourceMetric {
         name: name.to_owned(),
         value,
@@ -169,7 +169,7 @@ fn metric(result: &mut CollectorResult, name: &str, value: Option<f64>, unit: &s
     });
 }
 
-fn warning(result: &mut CollectorResult, message: &str) {
+fn warning(result: &mut CollectorData, message: &str) {
     result.warnings.push(CollectorWarning {
         collector: "system".to_owned(),
         message: message.to_owned(),

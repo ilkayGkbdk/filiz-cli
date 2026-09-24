@@ -41,13 +41,16 @@ pub struct CollectorWarning {
     pub message: String,
 }
 
-/// Data returned by one collector. Missing measurements stay local to the collector.
+/// Data returned by a successful collector. Missing measurements stay local to the collector.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct CollectorResult {
+pub struct CollectorData {
     pub metrics: Vec<ResourceMetric>,
     pub processes: Vec<ProcessInfo>,
     pub warnings: Vec<CollectorWarning>,
 }
+
+/// A collector failure is localized by snapshot assembly as a warning.
+pub type CollectorResult = Result<CollectorData, CollectorWarning>;
 
 /// The data gathered during one system refresh.
 #[derive(Clone, Debug, PartialEq)]

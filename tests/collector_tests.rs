@@ -44,7 +44,7 @@ fn collector_set_returns_usable_snapshot() {
 #[test]
 fn process_collector_preserves_start_time_and_pid_order() {
     let mut collector = collectors::processes::ProcessCollector::new();
-    let result = collector.collect();
+    let result = collector.collect().expect("process collection");
     assert!(result
         .processes
         .windows(2)
@@ -56,4 +56,25 @@ fn process_collector_preserves_start_time_and_pid_order() {
         .find(|process| process.identity.pid == current_pid)
         .expect("current process is present");
     assert!(current.identity.start_time > 0);
+}
+
+#[test]
+fn process_cpu_is_unavailable_until_a_second_refresh() {
+    let mut collector = collectors::processes::ProcessCollector::new();
+    let first = collector.collect().expect("first collection");
+    let current_pid = sysinfo::get_current_pid().expect("current PID").as_u32();
+    let first_current = first
+        .processes
+        .iter()
+        .find(|process| process.identity.pid == current_pid)
+        .expect("current process is present");
+    assert_eq!(first_current.cpu_percent, None);
+
+    let second = collector.collect().expect("second collection");
+    let second_current = second
+        .processes
+        .iter()
+        .find(|process| process.identity.pid == current_pid)
+        .expect("current process is present");
+    assert!(second_current.cpu_percent.is_some());
 }
