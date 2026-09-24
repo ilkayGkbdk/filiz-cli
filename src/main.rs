@@ -1,3 +1,4 @@
+pub mod collectors;
 pub mod model;
 
 fn main() -> anyhow::Result<()> {

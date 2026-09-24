@@ -41,6 +41,14 @@ pub struct CollectorWarning {
     pub message: String,
 }
 
+/// Data returned by one collector. Missing measurements stay local to the collector.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CollectorResult {
+    pub metrics: Vec<ResourceMetric>,
+    pub processes: Vec<ProcessInfo>,
+    pub warnings: Vec<CollectorWarning>,
+}
+
 /// The data gathered during one system refresh.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SystemSnapshot {
