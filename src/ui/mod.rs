@@ -63,9 +63,13 @@ pub fn render(frame: &mut Frame, app: &App) {
         Workspace::Network | Workspace::Disks | Workspace::More
     ) {
         match app.ui.workspace {
-            Workspace::Network => widgets::network(frame, sections[1], app),
-            Workspace::Disks => widgets::disks(frame, sections[1], app),
-            Workspace::More => widgets::more(frame, sections[1], app),
+            Workspace::Network => {
+                widgets::network(frame, workspace_area(sections[1], sections[2]), app)
+            }
+            Workspace::Disks => {
+                widgets::disks(frame, workspace_area(sections[1], sections[2]), app)
+            }
+            Workspace::More => widgets::more(frame, workspace_area(sections[1], sections[2]), app),
             _ => unreachable!(),
         }
         widgets::footer(frame, sections[4], app);
@@ -84,6 +88,17 @@ pub fn render(frame: &mut Frame, app: &App) {
         AppMode::ProcessDetail => widgets::detail_modal(frame, area, app),
         AppMode::ConfirmingAction => widgets::confirmation_modal(frame, area, app),
         _ => {}
+    }
+}
+
+fn workspace_area(
+    primary: ratatui::layout::Rect,
+    secondary: ratatui::layout::Rect,
+) -> ratatui::layout::Rect {
+    ratatui::layout::Rect {
+        y: primary.y,
+        height: primary.height.saturating_add(secondary.height),
+        ..primary
     }
 }
 

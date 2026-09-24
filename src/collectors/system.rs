@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::process::Command;
 use std::time::Instant;
 
 use sysinfo::{Disks, Networks, System};
@@ -91,6 +92,7 @@ impl Collector for SystemCollector {
 
         let total = self.system.total_memory();
         let used = self.system.used_memory();
+        let available = self.system.available_memory();
         metric(
             &mut result,
             "memory.total",
@@ -106,7 +108,11 @@ impl Collector for SystemCollector {
         metric(
             &mut result,
             "memory.available",
-            (total > 0).then_some(self.system.available_memory() as f64),
+            (total > 0).then_some(if available > 0 {
+                available
+            } else {
+                total.saturating_sub(used)
+            } as f64),
             "B",
         );
         metric(
@@ -116,11 +122,33 @@ impl Collector for SystemCollector {
             "B",
         );
         metric(&mut result, "memory.cached", None, "B");
+        metric(
+            &mut result,
+            "memory.swap.total",
+            Some(self.system.total_swap() as f64),
+            "B",
+        );
+        metric(
+            &mut result,
+            "memory.swap.used",
+            Some(self.system.used_swap() as f64),
+            "B",
+        );
+        metric(
+            &mut result,
+            "memory.swap.free",
+            Some(self.system.free_swap() as f64),
+            "B",
+        );
         metric(&mut result, "memory.usage", percentage(used, total), "%");
         if total == 0 {
             warning(&mut result, "memory capacity unavailable");
         }
         metric(&mut result, "uptime", Some(System::uptime() as f64), "s");
+        let load = System::load_average();
+        metric(&mut result, "load.1", Some(load.one), "load");
+        metric(&mut result, "load.5", Some(load.five), "load");
+        metric(&mut result, "load.15", Some(load.fifteen), "load");
 
         if self.disks.list().is_empty() {
             metric(&mut result, "disk.usage", None, "%");
@@ -154,6 +182,8 @@ impl Collector for SystemCollector {
                 percentage(used, total),
                 "%",
             );
+            metric(&mut result, &format!("disk.{mount}.read"), None, "B/s");
+            metric(&mut result, &format!("disk.{mount}.write"), None, "B/s");
             if total == 0 {
                 warning(&mut result, &format!("disk capacity unavailable: {mount}"));
             }
@@ -165,9 +195,10 @@ impl Collector for SystemCollector {
             warning(&mut result, "no network interfaces available");
         }
         let mut current_networks = HashMap::new();
+        let connections = collect_connections();
         let mut names: Vec<_> = self.networks.list().keys().collect();
         names.sort();
-        for name in names {
+        for (index, name) in names.into_iter().enumerate() {
             let network = &self.networks[name];
             let received = network.total_received();
             let transmitted = network.total_transmitted();
@@ -222,7 +253,11 @@ impl Collector for SystemCollector {
                 upload_total: transmitted.saturating_sub(state.baseline_transmitted),
                 peak_download: state.peak_received,
                 peak_upload: state.peak_transmitted,
-                connections: Vec::new(),
+                connections: if index == 0 {
+                    connections.clone()
+                } else {
+                    Vec::new()
+                },
             });
             state.received = received;
             state.transmitted = transmitted;
@@ -232,6 +267,40 @@ impl Collector for SystemCollector {
         self.previous_at = Some(now);
         Ok(result)
     }
+}
+
+fn collect_connections() -> Vec<crate::model::ConnectionSummary> {
+    let Ok(output) = Command::new("lsof")
+        .args(["-nP", "-iTCP", "-sTCP:ESTABLISHED"])
+        .output()
+    else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let fields = line.split_whitespace().collect::<Vec<_>>();
+            let process = fields.first()?.to_string();
+            let remote = fields
+                .iter()
+                .find(|field| field.contains("->"))?
+                .split("->")
+                .nth(1)?
+                .trim_end_matches("(ESTABLISHED)")
+                .to_string();
+            Some(crate::model::ConnectionSummary {
+                process,
+                remote,
+                direction: "TCP".to_owned(),
+                bytes_per_second: None,
+            })
+        })
+        .take(24)
+        .collect()
 }
 
 fn metric(result: &mut CollectorData, name: &str, value: Option<f64>, unit: &str) {

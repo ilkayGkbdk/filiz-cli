@@ -7,8 +7,11 @@ use ratatui::{
 };
 
 use crate::app::{App, Panel};
-use crate::model::{ActionKind, AppMode, NetworkSummary, ProcessInfo, SortMode, SystemSnapshot};
+use crate::model::{
+    ActionKind, AppMode, ConnectionSummary, NetworkSummary, ProcessInfo, SortMode, SystemSnapshot,
+};
 
+use super::state::Workspace;
 use super::theme;
 
 pub fn status(frame: &mut Frame, area: Rect, app: &App) {
@@ -37,7 +40,7 @@ pub fn status(frame: &mut Frame, area: Rect, app: &App) {
         .and_then(|snapshot| value(snapshot, "temperature.celsius"))
         .map(|degrees| format!("{degrees:.0}°C"))
         .unwrap_or_else(|| "N/A".into());
-    let lines = vec![
+    let mut lines = vec![
         Line::from(vec![
             Span::styled(
                 "  FILIZ  ",
@@ -67,6 +70,24 @@ pub fn status(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled(temperature, Style::default().fg(palette.text)),
         ]),
     ];
+    if area.height >= 3 {
+        let tabs = Workspace::ALL
+            .iter()
+            .enumerate()
+            .map(|(index, workspace)| {
+                let style = if *workspace == app.ui.workspace {
+                    Style::default()
+                        .fg(palette.background)
+                        .bg(palette.olive)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(palette.muted)
+                };
+                Span::styled(format!("  {} {}  ", index + 1, workspace.label()), style)
+            })
+            .collect::<Vec<_>>();
+        lines.push(Line::from(tabs));
+    }
     frame.render_widget(
         Paragraph::new(lines).style(Style::default().bg(palette.panel)),
         area,
@@ -306,8 +327,14 @@ pub fn network(frame: &mut Frame, area: Rect, app: &App) {
         .as_ref()
         .map(|snapshot| snapshot.network_summaries.as_slice())
         .unwrap_or(&[]);
-    let columns =
-        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(area);
+    let sections = Layout::vertical([
+        Constraint::Length(4),
+        Constraint::Length(7),
+        Constraint::Min(0),
+    ])
+    .split(area);
+    let columns = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(sections[0]);
     let (download, upload) = summaries.iter().fold((0.0, 0.0), |(down, up), item| {
         (
             down + item.download_rate.unwrap_or(0.0),
@@ -338,11 +365,6 @@ pub fn network(frame: &mut Frame, area: Rect, app: &App) {
         palette.olive,
         &palette,
     );
-    let body = Rect {
-        y: area.y.saturating_add(4),
-        height: area.height.saturating_sub(4),
-        ..area
-    };
     let rows = summaries.iter().map(network_row).collect::<Vec<_>>();
     let table = Table::new(
         if rows.is_empty() {
@@ -375,7 +397,52 @@ pub fn network(frame: &mut Frame, area: Rect, app: &App) {
     )
     .style(Style::default().fg(palette.text))
     .column_spacing(1);
-    frame.render_widget(table, body);
+    frame.render_widget(table, sections[1]);
+
+    let all_connections = summaries
+        .first()
+        .map(|summary| summary.connections.as_slice())
+        .unwrap_or(&[]);
+    let connection_offset = app
+        .ui
+        .scroll_offsets
+        .get(&Panel::Network)
+        .copied()
+        .unwrap_or(0) as usize;
+    let connections = all_connections
+        .get(connection_offset.min(all_connections.len())..)
+        .unwrap_or(&[]);
+    let connection_rows = connections.iter().map(connection_row).collect::<Vec<_>>();
+    let connection_table = Table::new(
+        if connection_rows.is_empty() {
+            vec![Row::new(["No active connections", "", "", ""])]
+        } else {
+            connection_rows
+        },
+        [
+            Constraint::Length(24),
+            Constraint::Min(24),
+            Constraint::Length(10),
+            Constraint::Length(14),
+        ],
+    )
+    .header(
+        Row::new(["PROCESS", "REMOTE", "TYPE", "TRAFFIC"]).style(
+            Style::default()
+                .fg(palette.muted)
+                .add_modifier(Modifier::BOLD),
+        ),
+    )
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(format!(" CONNECTIONS ({}) ", connections.len()))
+            .title_style(Style::default().fg(palette.olive))
+            .border_style(Style::default().fg(palette.border))
+            .style(Style::default().bg(palette.panel)),
+    )
+    .style(Style::default().fg(palette.text));
+    frame.render_widget(connection_table, sections[2]);
 }
 
 pub fn disks(frame: &mut Frame, area: Rect, app: &App) {
@@ -423,6 +490,8 @@ pub fn disks(frame: &mut Frame, area: Rect, app: &App) {
                         find("total")
                             .map(|value| bytes(value as u64))
                             .unwrap_or_else(|| "N/A".into()),
+                        find("read").map(rate).unwrap_or_else(|| "N/A".into()),
+                        find("write").map(rate).unwrap_or_else(|| "N/A".into()),
                     ])
                 })
                 .collect::<Vec<_>>()
@@ -430,7 +499,7 @@ pub fn disks(frame: &mut Frame, area: Rect, app: &App) {
         .unwrap_or_default();
     let table = Table::new(
         if rows.is_empty() {
-            vec![Row::new(["No disks", "", "", "", ""])]
+            vec![Row::new(["No disks", "", "", "", "", "", ""])]
         } else {
             rows
         },
@@ -440,10 +509,12 @@ pub fn disks(frame: &mut Frame, area: Rect, app: &App) {
             Constraint::Length(14),
             Constraint::Length(14),
             Constraint::Length(14),
+            Constraint::Length(14),
+            Constraint::Length(14),
         ],
     )
     .header(
-        Row::new(["MOUNT", "USED", "USED", "FREE", "TOTAL"]).style(
+        Row::new(["MOUNT", "USAGE", "USED", "FREE", "TOTAL", "READ", "WRITE"]).style(
             Style::default()
                 .fg(palette.muted)
                 .add_modifier(Modifier::BOLD),
@@ -466,7 +537,19 @@ pub fn more(frame: &mut Frame, area: Rect, app: &App) {
         return;
     }
     let palette = app.ui.theme.palette();
-    let lines = vec![
+    let temperature = app
+        .snapshot
+        .as_ref()
+        .and_then(|snapshot| value(snapshot, "temperature.celsius"))
+        .map(|value| format!("{value:.0}°C"))
+        .unwrap_or_else(|| "N/A".into());
+    let battery = app
+        .snapshot
+        .as_ref()
+        .and_then(|snapshot| value(snapshot, "battery.percent"))
+        .map(|value| format!("{value:.0}%"))
+        .unwrap_or_else(|| "N/A".into());
+    let mut lines = vec![
         Line::from(Span::styled(
             "  FILIZ CONTROL CENTER",
             Style::default()
@@ -476,13 +559,27 @@ pub fn more(frame: &mut Frame, area: Rect, app: &App) {
         Line::from(""),
         Line::from(format!("  THEME    {}", app.ui.theme.label())),
         Line::from(format!("  DENSITY  {:?}", app.ui.density)),
-        Line::from("  MENU     M  toggle layout options"),
+        Line::from(format!("  SENSORS  TEMP {temperature} · BATTERY {battery}")),
+        Line::from("  ABOUT    Filiz macOS monitor · MIT License"),
         Line::from(""),
         Line::from(Span::styled(
             "  for betül, with love ♡",
             Style::default().fg(palette.yellow),
         )),
     ];
+    if app.ui.menu_open {
+        lines.extend([
+            Line::from(""),
+            Line::from(Span::styled(
+                "  MENU OPEN  [L] density  [T] theme  [M] close",
+                Style::default()
+                    .fg(palette.green)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from("  Layout: compact / balanced / spacious"),
+            Line::from("  Theme: Forest / Amber / Mono / Solarized"),
+        ]);
+    }
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" MORE / SETTINGS ")
@@ -546,6 +643,18 @@ fn network_row(summary: &NetworkSummary) -> Row<'static> {
             rate(summary.peak_download),
             rate(summary.peak_upload)
         ),
+    ])
+}
+
+fn connection_row(connection: &ConnectionSummary) -> Row<'static> {
+    Row::new([
+        connection.process.clone(),
+        connection.remote.clone(),
+        connection.direction.clone(),
+        connection
+            .bytes_per_second
+            .map(rate)
+            .unwrap_or_else(|| "N/A".into()),
     ])
 }
 
@@ -887,7 +996,13 @@ fn cpu_detail(snapshot: Option<&SystemSnapshot>) -> String {
     let idle = value(snapshot, "cpu.idle")
         .map(|idle| format!("IDLE {idle:.0}%"))
         .unwrap_or_else(|| "IDLE N/A".into());
-    format!("{cores} · {idle}")
+    let load = value(snapshot, "load.1")
+        .map(|load| format!("LOAD {load:.2}"))
+        .unwrap_or_else(|| "LOAD N/A".into());
+    let temperature = value(snapshot, "temperature.celsius")
+        .map(|temperature| format!("TEMP {temperature:.0}°C"))
+        .unwrap_or_else(|| "TEMP N/A".into());
+    format!("{cores} · {idle} · {load} · {temperature}")
 }
 
 fn memory_detail(snapshot: Option<&SystemSnapshot>) -> String {
@@ -897,11 +1012,13 @@ fn memory_detail(snapshot: Option<&SystemSnapshot>) -> String {
     let used = value(snapshot, "memory.used").map(|value| bytes(value as u64));
     let free = value(snapshot, "memory.free").map(|value| bytes(value as u64));
     let available = value(snapshot, "memory.available").map(|value| bytes(value as u64));
+    let swap = value(snapshot, "memory.swap.used").map(|value| bytes(value as u64));
     format!(
-        "USED {} · FREE {} · AVAIL {}",
+        "USED {} · FREE {} · AVAIL {} · SWAP {}",
         used.unwrap_or_else(|| "N/A".into()),
         free.unwrap_or_else(|| "N/A".into()),
-        available.unwrap_or_else(|| "N/A".into())
+        available.unwrap_or_else(|| "N/A".into()),
+        swap.unwrap_or_else(|| "N/A".into())
     )
 }
 

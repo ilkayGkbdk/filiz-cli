@@ -179,6 +179,9 @@ pub enum Panel {
     Processes,
     Details,
     Resources,
+    Network,
+    Disks,
+    More,
 }
 
 impl Panel {
@@ -186,7 +189,10 @@ impl Panel {
         match self {
             Self::Processes => Self::Details,
             Self::Details => Self::Resources,
-            Self::Resources => Self::Processes,
+            Self::Resources => Self::Network,
+            Self::Network => Self::Disks,
+            Self::Disks => Self::More,
+            Self::More => Self::Processes,
         }
     }
 }
@@ -339,6 +345,13 @@ impl App {
     fn handle_dashboard(&mut self, key: KeyEvent) -> AppCommand {
         match self.ui.handle_key(key, self.focus) {
             UiCommand::WorkspaceChanged(workspace) => {
+                self.focus = match workspace {
+                    crate::ui::state::Workspace::Network => Panel::Network,
+                    crate::ui::state::Workspace::Disks => Panel::Disks,
+                    crate::ui::state::Workspace::More => Panel::More,
+                    crate::ui::state::Workspace::Overview => Panel::Resources,
+                    crate::ui::state::Workspace::Processes => Panel::Processes,
+                };
                 self.show_notice(format!("Workspace: {}", workspace.label()));
                 return AppCommand::Noop;
             }
@@ -511,6 +524,9 @@ fn panel_label(panel: Panel) -> &'static str {
         Panel::Processes => "Processes",
         Panel::Details => "Details",
         Panel::Resources => "Resources",
+        Panel::Network => "Network",
+        Panel::Disks => "Disks",
+        Panel::More => "More",
     }
 }
 
