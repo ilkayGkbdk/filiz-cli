@@ -1,3 +1,4 @@
+pub mod state;
 pub mod theme;
 pub mod widgets;
 
@@ -17,19 +18,40 @@ pub fn render(frame: &mut Frame, app: &App) {
         Block::default().style(Style::default().bg(theme::BACKGROUND)),
         area,
     );
-    let (header, resource, detail, footer) = if area.height >= 28 {
-        (3, 12, 6, 2)
-    } else if area.height >= 20 {
-        (2, 8, 3, 2)
-    } else if area.height >= 17 {
-        (2, 6, 3, 2)
+    let (header, resource, detail, footer) = match app.ui.density {
+        state::LayoutDensity::Compact => (2, 7, 3, 2),
+        state::LayoutDensity::Balanced => {
+            if area.height >= 28 {
+                (3, 12, 6, 2)
+            } else if area.height >= 20 {
+                (2, 8, 3, 2)
+            } else if area.height >= 17 {
+                (2, 6, 3, 2)
+            } else {
+                (1, 2, 0, 1)
+            }
+        }
+        state::LayoutDensity::Spacious => (3, 15, 8, 2),
+    };
+    let resource = if app.ui.hidden_panels.contains(&crate::app::Panel::Resources) {
+        0
     } else {
-        (1, 2, 0, 1)
+        resource
+    };
+    let detail = if app.ui.hidden_panels.contains(&crate::app::Panel::Details) {
+        0
+    } else {
+        detail
+    };
+    let process_constraint = if app.ui.hidden_panels.contains(&crate::app::Panel::Processes) {
+        Constraint::Length(0)
+    } else {
+        Constraint::Min(0)
     };
     let sections = Layout::vertical([
         Constraint::Length(header),
         Constraint::Length(resource),
-        Constraint::Min(0),
+        process_constraint,
         Constraint::Length(detail),
         Constraint::Length(footer),
     ])

@@ -3,7 +3,10 @@ use std::time::{Duration, SystemTime};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use filiz::app::App;
 use filiz::model::{ProcessIdentity, ProcessInfo, ResourceMetric, SystemSnapshot};
-use filiz::ui::render;
+use filiz::ui::{
+    render,
+    state::{LayoutDensity, UiCommand, UiState, Workspace},
+};
 use ratatui::{backend::TestBackend, Terminal};
 
 fn sample_app() -> App {
@@ -89,4 +92,37 @@ fn confirmation_modal_is_rendered_for_selected_process() {
     assert!(output.contains("CONFIRM"));
     assert!(output.contains("example-worker"));
     assert!(output.contains("Y"));
+}
+
+#[test]
+fn navigation_switches_workspaces_and_cycles_density() {
+    let mut state = UiState::default();
+    let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+    assert_eq!(
+        state.handle_key(key(KeyCode::Char('3')), filiz::app::Panel::Processes),
+        UiCommand::WorkspaceChanged(Workspace::Network)
+    );
+    assert_eq!(state.workspace, Workspace::Network);
+    assert_eq!(
+        state.handle_key(key(KeyCode::Char('l')), filiz::app::Panel::Processes),
+        UiCommand::DensityChanged(LayoutDensity::Spacious)
+    );
+    assert_eq!(state.density, LayoutDensity::Spacious);
+}
+
+#[test]
+fn panel_toggle_and_scroll_are_scoped_to_the_focused_panel() {
+    let mut state = UiState::default();
+    let key = KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE);
+    assert_eq!(
+        state.handle_key(key, filiz::app::Panel::Processes),
+        UiCommand::TogglePanel(filiz::app::Panel::Processes)
+    );
+    assert!(state.hidden_panels.contains(&filiz::app::Panel::Processes));
+    state.scroll_by(filiz::app::Panel::Processes, 6);
+    assert_eq!(
+        state.scroll_offsets.get(&filiz::app::Panel::Processes),
+        Some(&6)
+    );
+    assert_eq!(state.scroll_offsets.get(&filiz::app::Panel::Details), None);
 }

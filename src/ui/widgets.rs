@@ -52,6 +52,10 @@ pub fn status(frame: &mut Frame, area: Rect, app: &App) {
                     .fg(health_color)
                     .add_modifier(Modifier::BOLD),
             ),
+            Span::styled(
+                format!("  /  {}", app.ui.workspace.label()),
+                Style::default().fg(theme::OLIVE),
+            ),
         ]),
         Line::from(vec![
             Span::styled("  UPTIME ", Style::default().fg(theme::MUTED)),

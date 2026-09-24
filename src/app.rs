@@ -161,7 +161,7 @@ use std::io::Stdout;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent};
 use ratatui::{backend::CrosstermBackend, Terminal};
 
 use crate::actions::ProcessAction;
@@ -171,8 +171,9 @@ use crate::model::{
     ProcessIdentity, ProcessInfo, SortMode, SystemSnapshot,
 };
 use crate::ui;
+use crate::ui::state::{UiCommand, UiState};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Panel {
     Processes,
     Details,
@@ -211,6 +212,7 @@ pub struct App {
     pub pending_action: Option<PendingAction>,
     pub notice: Option<String>,
     pub histories: [Vec<u64>; 4],
+    pub ui: UiState,
     selected_identity: Option<ProcessIdentity>,
     notice_until: Option<Instant>,
 }
@@ -228,6 +230,7 @@ impl App {
             pending_action: None,
             notice: None,
             histories: std::array::from_fn(|_| Vec::new()),
+            ui: UiState::default(),
             selected_identity: None,
             notice_until: None,
         }
@@ -280,6 +283,22 @@ impl App {
         }
     }
 
+    pub fn handle_mouse(&mut self, mouse: MouseEvent) {
+        if self.mode != AppMode::Dashboard {
+            return;
+        }
+        if let UiCommand::Scroll(panel, amount) = self.ui.handle_mouse(mouse, self.focus) {
+            self.ui.scroll_by(panel, amount);
+            if panel == Panel::Processes {
+                if amount.is_positive() {
+                    self.move_selection(amount as usize);
+                } else {
+                    self.move_selection_up(amount.unsigned_abs() as usize);
+                }
+            }
+        }
+    }
+
     fn handle_confirmation(&mut self, code: KeyCode) -> AppCommand {
         match code {
             KeyCode::Char('y' | 'Y') => {
@@ -317,6 +336,38 @@ impl App {
     }
 
     fn handle_dashboard(&mut self, key: KeyEvent) -> AppCommand {
+        match self.ui.handle_key(key, self.focus) {
+            UiCommand::WorkspaceChanged(workspace) => {
+                self.show_notice(format!("Workspace: {}", workspace.label()));
+                return AppCommand::Noop;
+            }
+            UiCommand::FocusNext => {
+                self.focus = self.focus.next();
+                return AppCommand::Noop;
+            }
+            UiCommand::TogglePanel(panel) => {
+                self.show_notice(format!(
+                    "{} panel {}.",
+                    panel_label(panel),
+                    if self.ui.hidden_panels.contains(&panel) {
+                        "hidden"
+                    } else {
+                        "visible"
+                    }
+                ));
+                return AppCommand::Noop;
+            }
+            UiCommand::DensityChanged(density) => {
+                self.show_notice(format!("Layout: {density:?}"));
+                return AppCommand::Noop;
+            }
+            UiCommand::OpenMenu => return AppCommand::Noop,
+            UiCommand::Scroll(panel, amount) => {
+                self.ui.scroll_by(panel, amount);
+                return AppCommand::Noop;
+            }
+            UiCommand::Noop => {}
+        }
         match key.code {
             KeyCode::Char('q' | 'Q') => AppCommand::Quit,
             KeyCode::Tab => {
@@ -392,6 +443,19 @@ impl App {
         }
     }
 
+    fn move_selection(&mut self, amount: usize) {
+        let processes = self.visible_processes();
+        if !processes.is_empty() {
+            self.selected_index = (self.selected_index + amount).min(processes.len() - 1);
+            self.selected_identity = Some(processes[self.selected_index].identity);
+        }
+    }
+
+    fn move_selection_up(&mut self, amount: usize) {
+        self.selected_index = self.selected_index.saturating_sub(amount);
+        self.selected_identity = self.selected_process().map(|process| process.identity);
+    }
+
     fn select_first(&mut self) {
         self.selected_index = 0;
         self.selected_identity = self.visible_processes().first().map(|p| p.identity);
@@ -438,6 +502,14 @@ impl App {
             return true;
         }
         false
+    }
+}
+
+fn panel_label(panel: Panel) -> &'static str {
+    match panel {
+        Panel::Processes => "Processes",
+        Panel::Details => "Details",
+        Panel::Resources => "Resources",
     }
 }
 
@@ -510,6 +582,10 @@ pub fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
                         }
                         _ => {}
                     }
+                    dirty = true;
+                }
+                Event::Mouse(mouse) => {
+                    app.handle_mouse(mouse);
                     dirty = true;
                 }
                 Event::Resize(_, _) => dirty = true,
