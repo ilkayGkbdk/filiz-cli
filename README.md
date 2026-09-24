@@ -1,11 +1,22 @@
 # Filiz
 
+<p align="center">
+  <img src="assets/logo-256.png" alt="filiz logo" width="128">
+</p>
+
 Filiz is a live macOS system monitor for the terminal. It combines a readable
 resource dashboard with a process table and explicit confirmation for process
 actions.
 
 The first release targets macOS only and is currently developed in a private
 repository.
+
+## Brand assets
+
+The source logo and terminal-sized PNG variants live in [assets](assets/). PNG
+files are used for README, release, and installer surfaces. The runtime
+terminal banner will use an ANSI/Unicode conversion so it remains compatible
+with ordinary terminals.
 
 ## Install
 
