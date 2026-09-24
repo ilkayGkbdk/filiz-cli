@@ -5,6 +5,7 @@ mod collectors;
 #[path = "../src/model.rs"]
 mod model;
 
+use collectors::macos::{parse_battery, MacOsCollector};
 use collectors::system::{byte_rate, percentage};
 use collectors::Collector;
 
@@ -77,4 +78,56 @@ fn process_cpu_is_unavailable_until_a_second_refresh() {
         .find(|process| process.identity.pid == current_pid)
         .expect("current process is present");
     assert!(second_current.cpu_percent.is_some());
+}
+
+#[test]
+fn macos_battery_parser_extracts_typed_values() {
+    let sample = "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1234567)\t78%; discharging; 3:20 remaining present: true";
+    let battery = parse_battery(sample).expect("battery values");
+    assert_eq!(battery.percent, 78.0);
+    assert_eq!(battery.power_source.as_deref(), Some("Battery Power"));
+    assert_eq!(battery.charging, Some(false));
+}
+
+#[test]
+fn macos_battery_parser_rejects_unexposed_percentage() {
+    assert!(parse_battery("Now drawing from 'AC Power'\n No batteries available").is_none());
+}
+
+#[test]
+fn macos_battery_parser_keeps_percent_when_status_is_unavailable() {
+    let sample = "Now drawing from 'Battery Power'\n -InternalBattery-0\t78%; unknown;";
+    let battery = parse_battery(sample).expect("battery percent");
+    assert_eq!(battery.percent, 78.0);
+    assert_eq!(battery.charging, None);
+}
+
+#[test]
+fn macos_collector_reports_unavailable_fields_with_warnings() {
+    let values = MacOsCollector::new().collect();
+    if values.battery_percent.is_none() {
+        assert!(values
+            .warnings
+            .iter()
+            .any(|warning| warning.collector == "battery"));
+    }
+    if values.temperature_celsius.is_none() {
+        assert!(values
+            .warnings
+            .iter()
+            .any(|warning| warning.collector == "temperature"));
+    }
+}
+
+#[test]
+fn snapshot_includes_macos_metric_slots() {
+    let snapshot = collectors::CollectorSet::new().snapshot();
+    assert!(snapshot
+        .metrics
+        .iter()
+        .any(|metric| metric.name == "battery.percent"));
+    assert!(snapshot
+        .metrics
+        .iter()
+        .any(|metric| metric.name == "temperature.celsius"));
 }

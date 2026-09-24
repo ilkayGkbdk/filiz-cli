@@ -15,6 +15,86 @@ pub struct ProcessIdentity {
     pub start_time: u64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ActionKind {
+    Terminate,
+    Kill,
+}
+
+/// A selected process and proposed action, ready for the UI to confirm or cancel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PendingAction {
+    identity: ProcessIdentity,
+    kind: ActionKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ConfirmedAction {
+    identity: ProcessIdentity,
+    kind: ActionKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CancelledAction {
+    identity: ProcessIdentity,
+    kind: ActionKind,
+}
+
+impl PendingAction {
+    pub fn new(identity: ProcessIdentity, kind: ActionKind) -> Self {
+        Self { identity, kind }
+    }
+
+    pub fn identity(&self) -> ProcessIdentity {
+        self.identity
+    }
+    pub fn kind(&self) -> ActionKind {
+        self.kind
+    }
+
+    pub fn confirm(self) -> ConfirmedAction {
+        ConfirmedAction {
+            identity: self.identity,
+            kind: self.kind,
+        }
+    }
+
+    pub fn cancel(self) -> CancelledAction {
+        CancelledAction {
+            identity: self.identity,
+            kind: self.kind,
+        }
+    }
+}
+
+impl ConfirmedAction {
+    pub fn identity(&self) -> ProcessIdentity {
+        self.identity
+    }
+    pub fn kind(&self) -> ActionKind {
+        self.kind
+    }
+}
+
+impl CancelledAction {
+    pub fn identity(&self) -> ProcessIdentity {
+        self.identity
+    }
+    pub fn kind(&self) -> ActionKind {
+        self.kind
+    }
+}
+
+/// Platform measurements that may not be exposed on every Mac.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MacOsMetrics {
+    pub battery_percent: Option<f64>,
+    pub battery_power_source: Option<String>,
+    pub battery_charging: Option<bool>,
+    pub temperature_celsius: Option<f64>,
+    pub warnings: Vec<CollectorWarning>,
+}
+
 /// Process data captured during one collection cycle.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProcessInfo {

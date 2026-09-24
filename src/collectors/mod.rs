@@ -1,9 +1,11 @@
+pub mod macos;
 pub mod processes;
 pub mod system;
 
 use std::time::SystemTime;
 
 use crate::model::{CollectorResult, SystemSnapshot};
+use macos::MacOsCollector;
 use processes::ProcessCollector;
 use system::SystemCollector;
 
@@ -14,6 +16,7 @@ pub trait Collector {
 pub struct CollectorSet {
     system: SystemCollector,
     processes: ProcessCollector,
+    macos: MacOsCollector,
 }
 
 impl CollectorSet {
@@ -21,23 +24,21 @@ impl CollectorSet {
         Self {
             system: SystemCollector::new(),
             processes: ProcessCollector::new(),
+            macos: MacOsCollector::new(),
         }
     }
 
     pub fn snapshot(&mut self) -> SystemSnapshot {
-        snapshot_from_collectors(&mut self.system, &mut self.processes)
+        snapshot_from_collectors(&mut [&mut self.system, &mut self.processes, &mut self.macos])
     }
 }
 
-fn snapshot_from_collectors<'a>(
-    system: &'a mut dyn Collector,
-    processes: &'a mut dyn Collector,
-) -> SystemSnapshot {
+fn snapshot_from_collectors(collectors: &mut [&mut dyn Collector]) -> SystemSnapshot {
     let captured_at = SystemTime::now();
     let mut metrics = Vec::new();
     let mut process_list = Vec::new();
     let mut warnings = Vec::new();
-    for collector in [system, processes] {
+    for collector in collectors {
         match collector.collect() {
             Ok(section) => {
                 metrics.extend(section.metrics);
@@ -96,7 +97,8 @@ mod tests {
 
     #[test]
     fn failing_collector_does_not_discard_a_successful_section() {
-        let snapshot = snapshot_from_collectors(&mut FailingCollector, &mut WorkingCollector);
+        let snapshot =
+            snapshot_from_collectors(&mut [&mut FailingCollector, &mut WorkingCollector]);
         assert_eq!(snapshot.metrics[0].name, "working");
         assert_eq!(snapshot.warnings.len(), 1);
         assert_eq!(snapshot.warnings[0].collector, "failed");
