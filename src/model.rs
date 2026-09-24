@@ -88,6 +88,8 @@ impl CancelledAction {
 /// Platform measurements that may not be exposed on every Mac.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MacOsMetrics {
+    pub cpu_user_percent: Option<f64>,
+    pub cpu_system_percent: Option<f64>,
     pub battery_percent: Option<f64>,
     pub battery_power_source: Option<String>,
     pub battery_charging: Option<bool>,

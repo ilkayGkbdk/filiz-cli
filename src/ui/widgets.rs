@@ -1029,7 +1029,11 @@ fn cpu_detail(snapshot: Option<&SystemSnapshot>) -> String {
     let temperature = value(snapshot, "temperature.celsius")
         .map(|temperature| format!("TEMP {temperature:.0}°C"))
         .unwrap_or_else(|| "TEMP N/A".into());
-    format!("{cores} · {idle} · {load} · {temperature}")
+    let breakdown = match (value(snapshot, "cpu.user"), value(snapshot, "cpu.system")) {
+        (Some(user), Some(system)) => format!("USER {user:.0}% · SYS {system:.0}%"),
+        _ => "USER N/A · SYS N/A".into(),
+    };
+    format!("{cores} · {idle} · {breakdown} · {load} · {temperature}")
 }
 
 fn memory_detail(snapshot: Option<&SystemSnapshot>) -> String {

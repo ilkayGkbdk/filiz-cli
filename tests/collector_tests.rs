@@ -5,7 +5,7 @@ mod collectors;
 #[path = "../src/model.rs"]
 mod model;
 
-use collectors::macos::{parse_battery, MacOsCollector};
+use collectors::macos::{parse_battery, parse_cpu_usage, MacOsCollector};
 use collectors::system::{byte_rate, percentage};
 use collectors::Collector;
 
@@ -13,6 +13,14 @@ use collectors::Collector;
 fn byte_rate_uses_elapsed_seconds_between_fixed_samples() {
     assert_eq!(byte_rate(1_000, 3_500, 2.5), Some(1_000.0));
     assert_eq!(byte_rate(3_500, 4_000, 0.5), Some(1_000.0));
+}
+
+#[test]
+fn macos_cpu_parser_extracts_user_and_system_percentages() {
+    assert_eq!(
+        parse_cpu_usage("CPU usage: 12.50% user, 4.25% sys, 83.25% idle"),
+        (Some(12.5), Some(4.25))
+    );
 }
 
 #[test]

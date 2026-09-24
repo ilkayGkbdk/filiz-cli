@@ -15,6 +15,21 @@ pub struct BatteryReading {
     pub charging: Option<bool>,
 }
 
+pub fn parse_cpu_usage(output: &str) -> (Option<f64>, Option<f64>) {
+    let line = output.lines().find(|line| line.contains("CPU usage:"));
+    let Some(line) = line else {
+        return (None, None);
+    };
+    let values = line
+        .split(':')
+        .nth(1)
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(|part| part.split('%').next()?.trim().parse::<f64>().ok())
+        .collect::<Vec<_>>();
+    (values.first().copied(), values.get(1).copied())
+}
+
 /// Parse human-readable `pmset -g batt` output without assuming a battery exists.
 pub fn parse_battery(output: &str) -> Option<BatteryReading> {
     let source = output
@@ -67,6 +82,17 @@ impl MacOsCollector {
         let mut result = MacOsMetrics::default();
         #[cfg(target_os = "macos")]
         {
+            match Command::new("/usr/bin/top")
+                .args(["-l", "1", "-n", "0"])
+                .output()
+            {
+                Ok(output) if output.status.success() => {
+                    let (user, system) = parse_cpu_usage(&String::from_utf8_lossy(&output.stdout));
+                    result.cpu_user_percent = user;
+                    result.cpu_system_percent = system;
+                }
+                _ => {}
+            }
             match Command::new("/usr/bin/pmset").args(["-g", "batt"]).output() {
                 Ok(output) if output.status.success() => {
                     match parse_battery(&String::from_utf8_lossy(&output.stdout)) {
@@ -141,6 +167,16 @@ impl Collector for MacOsCollector {
         let values = MacOsCollector::collect(self);
         Ok(CollectorData {
             metrics: vec![
+                ResourceMetric {
+                    name: "cpu.user".to_owned(),
+                    value: values.cpu_user_percent,
+                    unit: "%".to_owned(),
+                },
+                ResourceMetric {
+                    name: "cpu.system".to_owned(),
+                    value: values.cpu_system_percent,
+                    unit: "%".to_owned(),
+                },
                 ResourceMetric {
                     name: "battery.percent".to_owned(),
                     value: values.battery_percent,
