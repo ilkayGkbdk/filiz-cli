@@ -28,6 +28,12 @@ chafa -f symbols -c 256 -s 32x12 assets/logo.png > assets/logo.ansi
 
 ## Install
 
+Recommended one-command installer with a small terminal progress screen:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ilkayGkbdk/filiz-cli/main/scripts/install.sh | bash
+```
+
 With Rust installed:
 
 ```sh
@@ -50,6 +56,10 @@ cargo uninstall filiz
 Filiz requires a recent stable Rust toolchain and a macOS terminal with support
 for alternate-screen and raw-mode input. Battery and temperature fields may
 show `N/A` when macOS does not expose them on a particular machine.
+
+The installer checks Git and Cargo, installs the latest `main` revision, and
+verifies the `filiz` command. It is intentionally transparent: the underlying
+Cargo output is retained in `/tmp/filiz-install.log` if installation fails.
 
 ## What it shows
 
