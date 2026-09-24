@@ -9,6 +9,7 @@ Use stable Rust and run these commands before submitting a change:
 
 ```sh
 cargo fmt --check
+cargo clippy -- -D warnings
 cargo check
 cargo test
 ```
