@@ -28,7 +28,7 @@ chafa -f symbols -c 256 -s 32x12 assets/logo.png > assets/logo.ansi
 
 ## Install
 
-Recommended one-command installer with a small terminal progress screen:
+Recommended one-command installer with a fullscreen terminal progress screen:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ilkayGkbdk/filiz-cli/main/scripts/install.sh | bash

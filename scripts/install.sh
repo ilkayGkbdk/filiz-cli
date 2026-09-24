@@ -2,53 +2,109 @@
 set -euo pipefail
 
 REPO_URL="${FILIZ_REPO_URL:-https://github.com/ilkayGkbdk/filiz-cli.git}"
+RAW_URL="${FILIZ_RAW_URL:-https://raw.githubusercontent.com/ilkayGkbdk/filiz-cli/main}"
 INSTALL_NAME="filiz"
-GREEN='\033[38;5;150m'
-OLIVE='\033[38;5;185m'
-MUTED='\033[38;5;245m'
-RED='\033[38;5;203m'
-RESET='\033[0m'
+ESC=$'\033'
+RESET="${ESC}[0m"
+GREEN="${ESC}[38;5;150m"
+OLIVE="${ESC}[38;5;185m"
+MUTED="${ESC}[38;5;245m"
+WHITE="${ESC}[38;5;255m"
+BG="${ESC}[48;2;10;14;12m"
+BOX_WIDTH=76
+LOGO_FILE=""
 
-clear_screen() {
-  printf '\033[2J\033[H'
+cleanup() {
+  printf '%s' "${RESET}${ESC}[?25h${ESC}[?1049l"
+  [[ -n "${LOGO_FILE}" ]] && rm -f -- "${LOGO_FILE}"
 }
 
-logo() {
-  printf '%b\n' "${OLIVE}                 .-.-.${RESET}"
-  printf '%b\n' "${OLIVE}              .-(     )-.${RESET}"
-  printf '%b\n' "${OLIVE}             /    _    \\${RESET}"
-  printf '%b\n' "${GREEN}            /   .' '.   \\${RESET}"
-  printf '%b\n' "${GREEN}           /___/     \\___\\${RESET}"
-  printf '%b\n' "${GREEN}              /  FILIZ  \\${RESET}"
-  printf '%b\n' "${MUTED}             /___________\\${RESET}"
-  printf '\n%b\n' "  ${MUTED}for betül, with love ♡${RESET}"
+trap cleanup EXIT
+trap 'exit 130' INT TERM
+
+terminal_size() {
+  COLUMNS="$(tput cols 2>/dev/null || printf '100')"
+  LINES="$(tput lines 2>/dev/null || printf '30')"
+  LEFT=$(( (COLUMNS - BOX_WIDTH) / 2 ))
+  (( LEFT < 0 )) && LEFT=0
+  TOP=$(( (LINES - 24) / 2 ))
+  (( TOP < 1 )) && TOP=1
+}
+
+indent() { printf '%*s' "$LEFT" ''; }
+
+box_text() {
+  local text="$1"
+  indent
+  printf '%s│%s  %s\n' "$OLIVE" "$RESET" "$text"
+}
+
+fallback_logo() {
+  printf '%b' "${OLIVE}                  .  .${RESET}\n"
+  printf '%b' "${OLIVE}               .  /\\  .${RESET}\n"
+  printf '%b' "${GREEN}              /\\ /  \\ /\\${RESET}\n"
+  printf '%b' "${GREEN}             /  \\____/  \\${RESET}\n"
+  printf '%b' "${GREEN}                \\FILIZ/${RESET}\n"
+}
+
+load_logo() {
+  LOGO_FILE="$(mktemp -t filiz-logo)"
+  if command -v curl >/dev/null 2>&1 && curl -fsSL --max-time 8 "${RAW_URL}/assets/logo.ansi" -o "$LOGO_FILE"; then
+    return
+  fi
+  : >"$LOGO_FILE"
+}
+
+logo_block() {
+  local line_content
+  if [[ -s "$LOGO_FILE" ]]; then
+    while IFS= read -r line_content; do
+      indent
+      printf '%s│%s  %s\n' "$OLIVE" "$RESET" "$line_content"
+    done <"$LOGO_FILE"
+  else
+    while IFS= read -r line_content; do
+      indent
+      printf '%s│%s  %b\n' "$OLIVE" "$RESET" "$line_content"
+    done < <(fallback_logo)
+  fi
+}
+
+render() {
+  local active="$1"
+  local message="$2"
+  local state="$3"
+  local marker="${4:-}"
+  terminal_size
+  printf '%s%s%s' "${ESC}[?1049h${ESC}[?25l${ESC}[2J${ESC}[H" "$BG" "$WHITE"
+  printf '\n%.0s' $(seq 1 "$TOP")
+  indent; printf '%s╭%*s╮%s\n' "$OLIVE" $((BOX_WIDTH - 2)) '' "$RESET"
+  logo_block
+  box_text ""
+  box_text "for betül, with love ♡"
+  box_text ""
+  box_text "${MUTED}macOS terminal monitor installer${RESET}"
+  box_text ""
+  box_text "${OLIVE}[1/4]${RESET}  Environment       $([[ $active -ge 1 ]] && printf '%s✓%s' "$GREEN" "$RESET" || printf '·')"
+  box_text "${OLIVE}[2/4]${RESET}  Repository         $([[ $active -ge 2 ]] && printf '%s✓%s' "$GREEN" "$RESET" || printf '·')"
+  box_text "${OLIVE}[3/4]${RESET}  Build & install    $([[ $active -ge 3 ]] && printf '%s✓%s' "$GREEN" "$RESET" || printf '·')"
+  box_text "${OLIVE}[4/4]${RESET}  Verify              $([[ $active -ge 4 ]] && printf '%s✓%s' "$GREEN" "$RESET" || printf '·')"
+  box_text ""
+  box_text "${GREEN}${marker}${RESET}  ${message}"
+  box_text ""
+  indent; printf '%s╰%*s╯%s\n' "$OLIVE" $((BOX_WIDTH - 2)) '' "$RESET"
+  printf '%s' "$RESET"
 }
 
 fail() {
-  printf '\n%b\n' "${RED}✕ $1${RESET}" >&2
-  printf '%b\n' "${MUTED}Kurulum tamamlanamadı. Yukarıdaki adımı kontrol edip tekrar deneyin.${RESET}" >&2
+  local message="$1"
+  render 3 "$message" "ERROR" "✕"
+  sleep 1
   exit 1
 }
 
 require_command() {
-  command -v "$1" >/dev/null 2>&1 || fail "$1 bulunamadı. Önce gerekli bağımlılığı kurun."
-}
-
-step() {
-  local number="$1"
-  local label="$2"
-  printf '%b\n' "${OLIVE}[$number/4]${RESET} ${label}"
-}
-
-progress() {
-  local message="$1"
-  local i
-  printf '    %s ' "$message"
-  for i in 1 2 3 4 5 6 7 8 9 10; do
-    printf '%b' "${GREEN}█${RESET}"
-    sleep 0.06
-  done
-  printf '  %b\n' "${GREEN}OK${RESET}"
+  command -v "$1" >/dev/null 2>&1 || fail "$1 bulunamadı; önce bağımlılığı kurun."
 }
 
 run_with_spinner() {
@@ -56,44 +112,45 @@ run_with_spinner() {
   shift
   local frames='|/-\\'
   local index=0
-  "$@" >/tmp/filiz-install.log 2>&1 &
+  local log_file
+  log_file="$(mktemp -t filiz-install)"
+  "$@" >"$log_file" 2>&1 &
   local pid=$!
   while kill -0 "$pid" 2>/dev/null; do
-    printf '\r    %s %b' "$message" "${GREEN}${frames:index++%4:1}${RESET}"
+    render 3 "$message" "RUNNING" "${frames:index%4:1}"
+    index=$((index + 1))
     sleep 0.12
   done
   if wait "$pid"; then
-    printf '\r    %s %b\n' "$message" "${GREEN}OK${RESET}"
+    rm -f -- "$log_file"
   else
-    printf '\n'
-    cat /tmp/filiz-install.log >&2
+    cat "$log_file" >&2
+    rm -f -- "$log_file"
     fail "Cargo kurulumu başarısız oldu."
   fi
 }
 
-clear_screen
-logo
-printf '%b\n\n' "${MUTED}macOS terminal monitor kurulumu başlıyor...${RESET}"
+load_logo
+render 0 "Kurulum hazırlanıyor..." "START" "·"
+sleep 0.35
 
-step 1 "Ortam kontrol ediliyor"
 require_command git
 require_command cargo
-progress "Git ve Cargo hazır"
+render 1 "Git ve Cargo hazır" "READY" "✓"
+sleep 0.35
 
-step 2 "Filiz kaynak kodu alınıyor"
-progress "Repository bağlantısı hazır"
+render 2 "Filiz repository bağlantısı hazır" "READY" "✓"
+sleep 0.35
 
-step 3 "Filiz derleniyor ve kuruluyor"
-run_with_spinner "Cargo ile Filiz kuruluyor" cargo install --git "$REPO_URL" --locked --force
+run_with_spinner "Filiz derleniyor ve kuruluyor" cargo install --git "$REPO_URL" --locked --force
 
-step 4 "Kurulum doğrulanıyor"
 if command -v "$INSTALL_NAME" >/dev/null 2>&1; then
   VERSION="$($INSTALL_NAME --version 2>/dev/null || true)"
-  progress "${VERSION:-filiz komutu hazır}"
+  render 4 "${VERSION:-filiz komutu hazır}" "READY" "✓"
 else
-  printf '%b\n' "${MUTED}    Binary ~/.cargo/bin/filiz altına kuruldu.${RESET}"
-  printf '%b\n' "${MUTED}    Terminal PATH ayarını yenileyin veya yeni terminal açın.${RESET}"
+  render 4 "Binary ~/.cargo/bin/filiz altına kuruldu; PATH'i yenileyin" "READY" "✓"
 fi
+sleep 1
 
-printf '\n%b\n' "${GREEN}✓ Filiz hazır. Çalıştırmak için: filiz${RESET}"
-printf '%b\n\n' "${MUTED}İyi izlemeler. ♡${RESET}"
+render 4 "Filiz hazır — çalıştırmak için: filiz" "COMPLETE" "✓"
+sleep 1.2
