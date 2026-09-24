@@ -2,7 +2,7 @@
 #[path = "../src/model.rs"]
 mod model;
 
-use model::{filter_processes, sort_processes, ProcessInfo, SortMode};
+use model::{filter_processes, sort_processes, ProcessIdentity, ProcessInfo, SortMode};
 
 fn process(
     pid: u32,
@@ -12,7 +12,10 @@ fn process(
     memory_bytes: u64,
 ) -> ProcessInfo {
     ProcessInfo {
-        pid,
+        identity: ProcessIdentity {
+            pid,
+            start_time: u64::from(pid) * 10,
+        },
         name: name.to_owned(),
         command: command.to_owned(),
         cpu_percent: Some(cpu_percent),
@@ -31,10 +34,17 @@ fn model_tests_filter_matches_name_and_command_case_insensitively() {
     ];
 
     let results = filter_processes(&processes, "tErMiNaL");
-    assert_eq!(results.iter().map(|p| p.pid).collect::<Vec<_>>(), vec![1]);
+    assert_eq!(
+        results.iter().map(|p| p.identity.pid).collect::<Vec<_>>(),
+        vec![1]
+    );
+    assert_eq!(results[0].identity, processes[0].identity);
 
     let results = filter_processes(&processes, "build-worker");
-    assert_eq!(results.iter().map(|p| p.pid).collect::<Vec<_>>(), vec![2]);
+    assert_eq!(
+        results.iter().map(|p| p.identity.pid).collect::<Vec<_>>(),
+        vec![2]
+    );
 }
 
 #[test]
@@ -47,7 +57,7 @@ fn model_tests_sort_orders_cpu_descending_with_pid_tie_breaker() {
 
     sort_processes(&mut processes, SortMode::Cpu);
     assert_eq!(
-        processes.iter().map(|p| p.pid).collect::<Vec<_>>(),
+        processes.iter().map(|p| p.identity.pid).collect::<Vec<_>>(),
         vec![2, 3, 8]
     );
 }
@@ -62,7 +72,21 @@ fn model_tests_sort_orders_memory_descending_with_pid_tie_breaker() {
 
     sort_processes(&mut processes, SortMode::Memory);
     assert_eq!(
-        processes.iter().map(|p| p.pid).collect::<Vec<_>>(),
+        processes.iter().map(|p| p.identity.pid).collect::<Vec<_>>(),
         vec![2, 3, 8]
     );
+}
+
+#[test]
+fn process_identity_includes_start_time_in_equality() {
+    let first_instance = ProcessIdentity {
+        pid: 42,
+        start_time: 1_000,
+    };
+    let replacement_instance = ProcessIdentity {
+        pid: 42,
+        start_time: 2_000,
+    };
+
+    assert_ne!(first_instance, replacement_instance);
 }

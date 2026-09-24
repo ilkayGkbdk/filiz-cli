@@ -8,10 +8,17 @@ pub struct ResourceMetric {
     pub unit: String,
 }
 
+/// Stable process identity for distinguishing PID reuse across process lifetimes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ProcessIdentity {
+    pub pid: u32,
+    pub start_time: u64,
+}
+
 /// Process data captured during one collection cycle.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProcessInfo {
-    pub pid: u32,
+    pub identity: ProcessIdentity,
     pub name: String,
     pub command: String,
     pub cpu_percent: Option<f32>,
@@ -86,7 +93,7 @@ pub fn sort_processes(processes: &mut [ProcessInfo], mode: SortMode) {
             SortMode::Memory => compare_optional_u64_desc(left.memory_bytes, right.memory_bytes),
         };
 
-        resource_order.then_with(|| left.pid.cmp(&right.pid))
+        resource_order.then_with(|| left.identity.pid.cmp(&right.identity.pid))
     });
 }
 
