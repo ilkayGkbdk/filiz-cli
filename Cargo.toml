@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 description = "An early private macOS system monitor for the terminal"
 license = "MIT"
+repository = "https://github.com/ilkayGkbdk/filiz-cli"
+keywords = ["macos", "terminal", "monitor", "ratatui"]
+categories = ["command-line-utilities", "os"]
 
 [[bin]]
 name = "filiz"

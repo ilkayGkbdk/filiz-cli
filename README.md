@@ -1,20 +1,84 @@
 # Filiz
 
-Filiz is an early, private macOS system monitor intended to present live system
-information in a terminal interface. The current Rust binary is a scaffold;
-monitoring and dashboard features are not implemented yet.
+Filiz is a live macOS system monitor for the terminal. It combines a readable
+resource dashboard with a process table and explicit confirmation for process
+actions.
 
-Any design preview or mockup associated with the project is non-runtime artwork
-and does not represent an implemented or working interface.
+The first release targets macOS only and is currently developed in a private
+repository.
+
+## Install
+
+With Rust installed:
+
+```sh
+cargo install --git https://github.com/ilkayGkbdk/filiz-cli.git
+filiz
+```
+
+Filiz requires a recent stable Rust toolchain and a macOS terminal with support
+for alternate-screen and raw-mode input. Battery and temperature fields may
+show `N/A` when macOS does not expose them on a particular machine.
+
+## What it shows
+
+- CPU usage, core count, and live history
+- Memory and disk usage
+- Network receive/transmit rates
+- Battery, uptime, and temperature when available
+- Processes sorted by CPU or memory
+- Process detail and text filtering
+- Safe terminate/kill flow with explicit `Y` confirmation
+
+## Controls
+
+| Key | Action |
+| --- | --- |
+| `Tab` | Change focused panel |
+| `↑` / `↓` | Select a process |
+| `Enter` | Open process detail |
+| `F` | Filter processes |
+| `C` / `M` | Sort by CPU / memory |
+| `K` / `Shift+K` | Request terminate / kill confirmation |
+| `Y` | Confirm a pending process action |
+| `N` / `Esc` | Cancel or close |
+| `Q` | Quit |
+
+Every refresh is read-only until a process action is explicitly confirmed.
+
+## Design preview
+
+The dashboard follows a dark olive/black terminal design: status first, large
+resource values next, then processes and details. The visual mockup used during
+design exploration is a design reference, not a runtime screenshot.
 
 ## Development
 
-Install the Rust toolchain, then run:
+Install the stable Rust toolchain, then run:
 
 ```sh
 cargo check
+cargo fmt --check
+cargo clippy -- -D warnings
 cargo test
+cargo build --release
 ```
+
+The live app can be started with:
+
+```sh
+cargo run --release
+```
+
+## Scope
+
+Filiz currently focuses on local macOS monitoring. Linux/Windows support,
+remote monitoring, persistent history, disk cleanup, and system-service
+management are intentionally outside the first release.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the local checks and commit workflow.
 
 ## License
 

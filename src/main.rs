@@ -1,9 +1,3 @@
-pub mod actions;
-pub mod app;
-pub mod collectors;
-pub mod model;
-pub mod ui;
-
 use std::io::{self, stdout};
 use std::time::Duration;
 
@@ -11,6 +5,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use filiz::app;
 use ratatui::{backend::CrosstermBackend, Terminal};
 
 struct TerminalGuard;
