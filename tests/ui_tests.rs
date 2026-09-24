@@ -127,3 +127,31 @@ fn panel_toggle_and_scroll_are_scoped_to_the_focused_panel() {
     );
     assert_eq!(state.scroll_offsets.get(&filiz::app::Panel::Details), None);
 }
+
+#[test]
+fn every_workspace_renders_at_supported_terminal_sizes() {
+    for workspace in Workspace::ALL {
+        for (width, height) in [(110, 35), (80, 24), (48, 20), (20, 8)] {
+            let mut app = sample_app();
+            app.ui.workspace = workspace;
+            let output = screen(&app, width, height);
+            assert!(
+                !output.is_empty(),
+                "empty output for {workspace:?} at {width}x{height}"
+            );
+        }
+    }
+}
+
+#[test]
+fn workspace_content_and_theme_controls_are_visible() {
+    let mut app = sample_app();
+    app.ui.workspace = Workspace::Network;
+    assert!(screen(&app, 110, 35).contains("DOWNLOAD"));
+    app.ui.workspace = Workspace::Disks;
+    assert!(screen(&app, 110, 35).contains("DISKS"));
+    app.ui.workspace = Workspace::More;
+    let output = screen(&app, 110, 35);
+    assert!(output.contains("MORE / SETTINGS"));
+    assert!(output.contains("for betül, with love"));
+}
