@@ -270,6 +270,10 @@ impl Collector for SystemCollector {
 }
 
 fn collect_connections() -> Vec<crate::model::ConnectionSummary> {
+    let nettop = collect_nettop_connections();
+    if !nettop.is_empty() {
+        return nettop;
+    }
     let Ok(output) = Command::new("lsof")
         .args(["-nP", "-iTCP", "-sTCP:ESTABLISHED"])
         .output()
@@ -301,6 +305,72 @@ fn collect_connections() -> Vec<crate::model::ConnectionSummary> {
         })
         .take(24)
         .collect()
+}
+
+pub fn parse_nettop_csv(output: &str) -> Vec<crate::model::ConnectionSummary> {
+    let mut lines = output.lines().filter(|line| !line.trim().is_empty());
+    let Some(header) = lines.next() else {
+        return Vec::new();
+    };
+    let columns = header.split(',').map(str::trim).collect::<Vec<_>>();
+    let index = |name: &str| columns.iter().position(|column| *column == name);
+    let process_index = index("process").or_else(|| index("proc"));
+    let remote_index = index("remote").or_else(|| index("remote_addr"));
+    let incoming_index = index("bytes_in").or_else(|| index("rx_bytes"));
+    let outgoing_index = index("bytes_out").or_else(|| index("tx_bytes"));
+    let Some(process_index) = process_index else {
+        return Vec::new();
+    };
+    lines
+        .filter_map(|line| {
+            let fields = line.split(',').map(str::trim).collect::<Vec<_>>();
+            let process = fields.get(process_index)?.trim_matches('"').to_owned();
+            if process.is_empty() {
+                return None;
+            }
+            let remote = remote_index
+                .and_then(|index| fields.get(index))
+                .map(|value| value.trim_matches('"').to_owned())
+                .unwrap_or_else(|| "N/A".to_owned());
+            let incoming = incoming_index
+                .and_then(|index| fields.get(index))
+                .and_then(|value| value.trim_matches('"').parse::<f64>().ok());
+            let outgoing = outgoing_index
+                .and_then(|index| fields.get(index))
+                .and_then(|value| value.trim_matches('"').parse::<f64>().ok());
+            Some(crate::model::ConnectionSummary {
+                process,
+                remote,
+                direction: "NET".to_owned(),
+                bytes_per_second: match (incoming, outgoing) {
+                    (Some(incoming), Some(outgoing)) => Some(incoming + outgoing),
+                    (Some(value), None) | (None, Some(value)) => Some(value),
+                    _ => None,
+                },
+            })
+        })
+        .take(24)
+        .collect()
+}
+
+fn collect_nettop_connections() -> Vec<crate::model::ConnectionSummary> {
+    let Ok(output) = Command::new("nettop")
+        .args([
+            "-P",
+            "-L",
+            "1",
+            "-x",
+            "-J",
+            "process,remote,bytes_in,bytes_out",
+        ])
+        .output()
+    else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    parse_nettop_csv(&String::from_utf8_lossy(&output.stdout))
 }
 
 fn metric(result: &mut CollectorData, name: &str, value: Option<f64>, unit: &str) {

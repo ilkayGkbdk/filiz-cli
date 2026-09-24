@@ -6,7 +6,7 @@ mod collectors;
 mod model;
 
 use collectors::macos::{parse_battery, parse_cpu_usage, MacOsCollector};
-use collectors::system::{byte_rate, percentage};
+use collectors::system::{byte_rate, parse_nettop_csv, percentage};
 use collectors::Collector;
 
 #[test]
@@ -21,6 +21,16 @@ fn macos_cpu_parser_extracts_user_and_system_percentages() {
         parse_cpu_usage("CPU usage: 12.50% user, 4.25% sys, 83.25% idle"),
         (Some(12.5), Some(4.25))
     );
+}
+
+#[test]
+fn nettop_csv_parser_extracts_process_traffic() {
+    let rows =
+        parse_nettop_csv("process,remote,bytes_in,bytes_out\nSafari,example.com:443,1200,800\n");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].process, "Safari");
+    assert_eq!(rows[0].remote, "example.com:443");
+    assert_eq!(rows[0].bytes_per_second, Some(2000.0));
 }
 
 #[test]
