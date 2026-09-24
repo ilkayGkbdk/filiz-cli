@@ -378,6 +378,125 @@ pub fn network(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(table, body);
 }
 
+pub fn disks(frame: &mut Frame, area: Rect, app: &App) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+    let palette = app.ui.theme.palette();
+    let rows = app
+        .snapshot
+        .as_ref()
+        .map(|snapshot| {
+            snapshot
+                .metrics
+                .iter()
+                .filter(|metric| {
+                    metric.name.starts_with("disk.") && metric.name.ends_with(".usage")
+                })
+                .map(|metric| {
+                    let mount = metric
+                        .name
+                        .strip_prefix("disk.")
+                        .unwrap_or("N/A")
+                        .strip_suffix(".usage")
+                        .unwrap_or("N/A");
+                    let prefix = format!("disk.{mount}");
+                    let find = |suffix: &str| {
+                        snapshot
+                            .metrics
+                            .iter()
+                            .find(|item| item.name == format!("{prefix}.{suffix}"))
+                            .and_then(|item| item.value)
+                    };
+                    Row::new([
+                        mount.to_owned(),
+                        metric
+                            .value
+                            .map(|value| format!("{value:.0}%"))
+                            .unwrap_or_else(|| "N/A".into()),
+                        find("used")
+                            .map(|value| bytes(value as u64))
+                            .unwrap_or_else(|| "N/A".into()),
+                        find("free")
+                            .map(|value| bytes(value as u64))
+                            .unwrap_or_else(|| "N/A".into()),
+                        find("total")
+                            .map(|value| bytes(value as u64))
+                            .unwrap_or_else(|| "N/A".into()),
+                    ])
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let table = Table::new(
+        if rows.is_empty() {
+            vec![Row::new(["No disks", "", "", "", ""])]
+        } else {
+            rows
+        },
+        [
+            Constraint::Length(18),
+            Constraint::Length(10),
+            Constraint::Length(14),
+            Constraint::Length(14),
+            Constraint::Length(14),
+        ],
+    )
+    .header(
+        Row::new(["MOUNT", "USED", "USED", "FREE", "TOTAL"]).style(
+            Style::default()
+                .fg(palette.muted)
+                .add_modifier(Modifier::BOLD),
+        ),
+    )
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" DISKS ")
+            .title_style(Style::default().fg(palette.olive))
+            .border_style(Style::default().fg(palette.border))
+            .style(Style::default().bg(palette.panel)),
+    )
+    .style(Style::default().fg(palette.text));
+    frame.render_widget(table, area);
+}
+
+pub fn more(frame: &mut Frame, area: Rect, app: &App) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+    let palette = app.ui.theme.palette();
+    let lines = vec![
+        Line::from(Span::styled(
+            "  FILIZ CONTROL CENTER",
+            Style::default()
+                .fg(palette.olive)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(format!("  THEME    {}", app.ui.theme.label())),
+        Line::from(format!("  DENSITY  {:?}", app.ui.density)),
+        Line::from("  MENU     M  toggle layout options"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  for betül, with love ♡",
+            Style::default().fg(palette.yellow),
+        )),
+    ];
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" MORE / SETTINGS ")
+        .title_style(Style::default().fg(palette.olive))
+        .border_style(Style::default().fg(palette.border))
+        .style(Style::default().bg(palette.panel));
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(block)
+            .style(Style::default().fg(palette.text)),
+        area,
+    );
+}
+
 fn network_card(
     frame: &mut Frame,
     area: Rect,

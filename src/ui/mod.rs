@@ -58,8 +58,16 @@ pub fn render(frame: &mut Frame, app: &App) {
     ])
     .split(area);
     widgets::status(frame, sections[0], app);
-    if app.ui.workspace == Workspace::Network {
-        widgets::network(frame, sections[1], app);
+    if matches!(
+        app.ui.workspace,
+        Workspace::Network | Workspace::Disks | Workspace::More
+    ) {
+        match app.ui.workspace {
+            Workspace::Network => widgets::network(frame, sections[1], app),
+            Workspace::Disks => widgets::disks(frame, sections[1], app),
+            Workspace::More => widgets::more(frame, sections[1], app),
+            _ => unreachable!(),
+        }
         widgets::footer(frame, sections[4], app);
         match app.mode {
             AppMode::ProcessDetail => widgets::detail_modal(frame, area, app),
