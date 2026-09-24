@@ -35,6 +35,18 @@ cargo install --git https://github.com/ilkayGkbdk/filiz-cli.git
 filiz
 ```
 
+To uninstall Filiz:
+
+```sh
+./scripts/uninstall.sh
+```
+
+For a Cargo-only installation, the direct command is also available:
+
+```sh
+cargo uninstall filiz
+```
+
 Filiz requires a recent stable Rust toolchain and a macOS terminal with support
 for alternate-screen and raw-mode input. Battery and temperature fields may
 show `N/A` when macOS does not expose them on a particular machine.
