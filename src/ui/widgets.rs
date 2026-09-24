@@ -12,6 +12,7 @@ use crate::model::{ActionKind, AppMode, ProcessInfo, SortMode, SystemSnapshot};
 use super::theme;
 
 pub fn status(frame: &mut Frame, area: Rect, app: &App) {
+    let palette = app.ui.theme.palette();
     let snapshot = app.snapshot.as_ref();
     let warnings = snapshot.map_or(0, |snapshot| snapshot.warnings.len());
     let health = if warnings == 0 {
@@ -20,9 +21,9 @@ pub fn status(frame: &mut Frame, area: Rect, app: &App) {
         "CHECK METRICS"
     };
     let health_color = if warnings == 0 {
-        theme::GREEN
+        palette.green
     } else {
-        theme::YELLOW
+        palette.yellow
     };
     let uptime = snapshot
         .and_then(|snapshot| value(snapshot, "uptime"))
@@ -41,11 +42,11 @@ pub fn status(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled(
                 "  FILIZ  ",
                 Style::default()
-                    .fg(theme::BACKGROUND)
-                    .bg(theme::OLIVE)
+                    .fg(palette.background)
+                    .bg(palette.olive)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("  SYSTEM MONITOR  /  ", Style::default().fg(theme::MUTED)),
+            Span::styled("  SYSTEM MONITOR  /  ", Style::default().fg(palette.muted)),
             Span::styled(
                 health,
                 Style::default()
@@ -54,20 +55,20 @@ pub fn status(frame: &mut Frame, area: Rect, app: &App) {
             ),
             Span::styled(
                 format!("  /  {}", app.ui.workspace.label()),
-                Style::default().fg(theme::OLIVE),
+                Style::default().fg(palette.olive),
             ),
         ]),
         Line::from(vec![
-            Span::styled("  UPTIME ", Style::default().fg(theme::MUTED)),
-            Span::styled(uptime, Style::default().fg(theme::TEXT)),
-            Span::styled("   BATTERY ", Style::default().fg(theme::MUTED)),
-            Span::styled(battery, Style::default().fg(theme::TEXT)),
-            Span::styled("   TEMP ", Style::default().fg(theme::MUTED)),
-            Span::styled(temperature, Style::default().fg(theme::TEXT)),
+            Span::styled("  UPTIME ", Style::default().fg(palette.muted)),
+            Span::styled(uptime, Style::default().fg(palette.text)),
+            Span::styled("   BATTERY ", Style::default().fg(palette.muted)),
+            Span::styled(battery, Style::default().fg(palette.text)),
+            Span::styled("   TEMP ", Style::default().fg(palette.muted)),
+            Span::styled(temperature, Style::default().fg(palette.text)),
         ]),
     ];
     frame.render_widget(
-        Paragraph::new(lines).style(Style::default().bg(theme::PANEL)),
+        Paragraph::new(lines).style(Style::default().bg(palette.panel)),
         area,
     );
 }
@@ -76,6 +77,7 @@ pub fn resources(frame: &mut Frame, area: Rect, app: &App) {
     if area.height == 0 || area.width == 0 {
         return;
     }
+    let palette = app.ui.theme.palette();
     let snapshot = app.snapshot.as_ref();
     let cpu = snapshot.and_then(|s| value(s, "cpu.usage"));
     let memory = snapshot.and_then(|s| value(s, "memory.usage"));
@@ -85,24 +87,21 @@ pub fn resources(frame: &mut Frame, area: Rect, app: &App) {
         (
             "CPU",
             percent(cpu),
-            snapshot
-                .and_then(|s| value(s, "cpu.cores"))
-                .map(|cores| format!("{cores:.0} CORES"))
-                .unwrap_or_else(|| "CORES N/A".into()),
+            cpu_detail(snapshot),
             cpu,
             &app.histories[0],
         ),
         (
             "MEMORY",
             percent(memory),
-            memory_capacity(snapshot),
+            memory_detail(snapshot),
             memory,
             &app.histories[1],
         ),
         (
             "DISK",
             percent(disk),
-            disk_capacity(snapshot),
+            disk_detail(snapshot),
             disk,
             &app.histories[2],
         ),
@@ -126,7 +125,13 @@ pub fn resources(frame: &mut Frame, area: Rect, app: &App) {
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(rows[row]);
         for (column, card) in pair.iter().enumerate() {
-            resource_card(frame, columns[column], card, app.focus == Panel::Resources);
+            resource_card(
+                frame,
+                columns[column],
+                card,
+                app.focus == Panel::Resources,
+                &palette,
+            );
         }
     }
 }
@@ -136,33 +141,40 @@ fn resource_card(
     area: Rect,
     card: &(&str, String, String, Option<f64>, &Vec<u64>),
     focused: bool,
+    palette: &theme::Palette,
 ) {
     let (title, main, secondary, usage, history) = card;
     if area.width < 3 || area.height < 2 {
         return;
     }
-    let border = if focused { theme::OLIVE } else { theme::BORDER };
+    let border = if focused {
+        palette.olive
+    } else {
+        palette.border
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .title(format!(" {title} "))
         .title_style(
             Style::default()
-                .fg(theme::MUTED)
+                .fg(palette.muted)
                 .add_modifier(Modifier::BOLD),
         )
-        .style(Style::default().bg(theme::PANEL).fg(theme::TEXT))
+        .style(Style::default().bg(palette.panel).fg(palette.text))
         .border_style(Style::default().fg(border));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.height == 0 || inner.width == 0 {
         return;
     }
-    let color = usage.map(usage_color).unwrap_or(theme::OLIVE);
+    let color = usage
+        .map(|value| usage_color(value, palette))
+        .unwrap_or(palette.olive);
     frame.render_widget(
         Paragraph::new(main.to_owned()).style(
             Style::default()
                 .fg(color)
-                .bg(theme::PANEL)
+                .bg(palette.panel)
                 .add_modifier(Modifier::BOLD),
         ),
         Rect { height: 1, ..inner },
@@ -170,7 +182,7 @@ fn resource_card(
     if inner.height > 1 {
         frame.render_widget(
             Paragraph::new(secondary.to_owned())
-                .style(Style::default().fg(theme::MUTED).bg(theme::PANEL)),
+                .style(Style::default().fg(palette.muted).bg(palette.panel)),
             Rect {
                 y: inner.y + 1,
                 height: 1,
@@ -192,7 +204,7 @@ fn resource_card(
                 } else {
                     history.iter().copied().max().unwrap_or(1).max(1)
                 })
-                .style(Style::default().fg(color).bg(theme::PANEL)),
+                .style(Style::default().fg(color).bg(palette.panel)),
             spark_area,
         );
     }
@@ -202,6 +214,7 @@ pub fn processes(frame: &mut Frame, area: Rect, app: &App) {
     if area.height == 0 || area.width == 0 {
         return;
     }
+    let palette = app.ui.theme.palette();
     let processes = app.visible_processes();
     let sort = match app.sort {
         SortMode::Cpu => "CPU",
@@ -213,14 +226,14 @@ pub fn processes(frame: &mut Frame, area: Rect, app: &App) {
         .title(title)
         .title_style(
             Style::default()
-                .fg(theme::OLIVE)
+                .fg(palette.olive)
                 .add_modifier(Modifier::BOLD),
         )
-        .style(Style::default().bg(theme::PANEL))
+        .style(Style::default().bg(palette.panel))
         .border_style(Style::default().fg(if app.focus == Panel::Processes {
-            theme::OLIVE
+            palette.olive
         } else {
-            theme::BORDER
+            palette.border
         }));
     if area.height < 3 || area.width < 12 {
         frame.render_widget(block, area);
@@ -234,7 +247,7 @@ pub fn processes(frame: &mut Frame, area: Rect, app: &App) {
     }
     .style(
         Style::default()
-            .fg(theme::MUTED)
+            .fg(palette.muted)
             .add_modifier(Modifier::BOLD),
     );
     let rows: Vec<Row> = if processes.is_empty() {
@@ -246,7 +259,7 @@ pub fn processes(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         processes
             .iter()
-            .map(|process| process_row(process, wide))
+            .map(|process| process_row(process, wide, &palette))
             .collect()
     };
     let widths = if wide {
@@ -270,8 +283,8 @@ pub fn processes(frame: &mut Frame, area: Rect, app: &App) {
         .block(block)
         .row_highlight_style(
             Style::default()
-                .fg(theme::BACKGROUND)
-                .bg(theme::OLIVE)
+                .fg(palette.background)
+                .bg(palette.olive)
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol("▸ ")
@@ -283,7 +296,7 @@ pub fn processes(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_stateful_widget(table, area, &mut state);
 }
 
-fn process_row(process: &ProcessInfo, wide: bool) -> Row<'static> {
+fn process_row(process: &ProcessInfo, wide: bool, palette: &theme::Palette) -> Row<'static> {
     let mut cells = vec![
         process.name.clone(),
         process.identity.pid.to_string(),
@@ -299,13 +312,14 @@ fn process_row(process: &ProcessInfo, wide: bool) -> Row<'static> {
     if wide {
         cells.push(process.status.clone().unwrap_or_else(|| "N/A".into()));
     }
-    Row::new(cells).style(Style::default().fg(theme::TEXT))
+    Row::new(cells).style(Style::default().fg(palette.text))
 }
 
 pub fn details(frame: &mut Frame, area: Rect, app: &App) {
     if area.height == 0 || area.width == 0 {
         return;
     }
+    let palette = app.ui.theme.palette();
     let selected = app.selected_process();
     let warning = app
         .snapshot
@@ -316,40 +330,40 @@ pub fn details(frame: &mut Frame, area: Rect, app: &App) {
         lines.push(Line::from(Span::styled(
             format!(" EVENT  {notice}"),
             Style::default()
-                .fg(theme::YELLOW)
+                .fg(palette.yellow)
                 .add_modifier(Modifier::BOLD),
         )));
     } else if let Some(warning) = warning {
         lines.push(Line::from(Span::styled(
             format!(" WARNING  {}: {}", warning.collector, warning.message),
             Style::default()
-                .fg(theme::YELLOW)
+                .fg(palette.yellow)
                 .add_modifier(Modifier::BOLD),
         )));
     }
     if let Some(process) = selected {
         lines.extend([
             Line::from(vec![
-                Span::styled(" PROCESS  ", Style::default().fg(theme::MUTED)),
+                Span::styled(" PROCESS  ", Style::default().fg(palette.muted)),
                 Span::styled(
                     process.name,
                     Style::default()
-                        .fg(theme::TEXT)
+                        .fg(palette.text)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     format!("  PID {}", process.identity.pid),
-                    Style::default().fg(theme::OLIVE),
+                    Style::default().fg(palette.olive),
                 ),
             ]),
             Line::from(vec![
-                Span::styled(" COMMAND  ", Style::default().fg(theme::MUTED)),
-                Span::styled(process.command, Style::default().fg(theme::TEXT)),
+                Span::styled(" COMMAND  ", Style::default().fg(palette.muted)),
+                Span::styled(process.command, Style::default().fg(palette.text)),
             ]),
             Line::from(vec![
-                Span::styled(" USER  ", Style::default().fg(theme::MUTED)),
+                Span::styled(" USER  ", Style::default().fg(palette.muted)),
                 Span::raw(process.user.unwrap_or_else(|| "N/A".into())),
-                Span::styled("   STATE  ", Style::default().fg(theme::MUTED)),
+                Span::styled("   STATE  ", Style::default().fg(palette.muted)),
                 Span::raw(process.status.unwrap_or_else(|| "N/A".into())),
             ]),
         ]);
@@ -359,13 +373,13 @@ pub fn details(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" DETAILS / EVENTS ")
-        .title_style(Style::default().fg(theme::OLIVE))
+        .title_style(Style::default().fg(palette.olive))
         .border_style(Style::default().fg(if app.focus == Panel::Details {
-            theme::OLIVE
+            palette.olive
         } else {
-            theme::BORDER
+            palette.border
         }))
-        .style(Style::default().bg(theme::PANEL).fg(theme::TEXT));
+        .style(Style::default().bg(palette.panel).fg(palette.text));
     frame.render_widget(
         Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
         area,
@@ -376,75 +390,76 @@ pub fn footer(frame: &mut Frame, area: Rect, app: &App) {
     if area.height == 0 || area.width == 0 {
         return;
     }
+    let palette = app.ui.theme.palette();
     let lines = if app.mode == AppMode::Filtering {
         vec![Line::from(vec![
             Span::styled(
                 " FILTER  ",
-                Style::default().fg(theme::BACKGROUND).bg(theme::OLIVE),
+                Style::default().fg(palette.background).bg(palette.olive),
             ),
             Span::styled(
                 format!(" {}_", app.filter),
-                Style::default().fg(theme::TEXT),
+                Style::default().fg(palette.text),
             ),
             Span::styled(
                 "   ENTER DONE  ESC CLOSE",
-                Style::default().fg(theme::MUTED),
+                Style::default().fg(palette.muted),
             ),
         ])]
     } else if area.width < 42 {
         vec![Line::from(vec![
-            Span::styled("  Q ", Style::default().fg(theme::OLIVE)),
-            Span::styled("QUIT   ", Style::default().fg(theme::MUTED)),
-            Span::styled("F ", Style::default().fg(theme::OLIVE)),
-            Span::styled("FILTER   ", Style::default().fg(theme::MUTED)),
-            Span::styled("K ", Style::default().fg(theme::YELLOW)),
-            Span::styled("ACTION", Style::default().fg(theme::MUTED)),
+            Span::styled("  Q ", Style::default().fg(palette.olive)),
+            Span::styled("QUIT   ", Style::default().fg(palette.muted)),
+            Span::styled("F ", Style::default().fg(palette.olive)),
+            Span::styled("FILTER   ", Style::default().fg(palette.muted)),
+            Span::styled("K ", Style::default().fg(palette.yellow)),
+            Span::styled("ACTION", Style::default().fg(palette.muted)),
         ])]
     } else if area.width < 100 {
         vec![
             Line::from(vec![
-                Span::styled("  ↑↓ ", Style::default().fg(theme::OLIVE)),
-                Span::styled("SELECT  ", Style::default().fg(theme::MUTED)),
-                Span::styled("ENTER ", Style::default().fg(theme::OLIVE)),
-                Span::styled("DETAIL  ", Style::default().fg(theme::MUTED)),
-                Span::styled("F ", Style::default().fg(theme::OLIVE)),
-                Span::styled("FILTER  ", Style::default().fg(theme::MUTED)),
-                Span::styled("Q ", Style::default().fg(theme::OLIVE)),
-                Span::styled("QUIT", Style::default().fg(theme::MUTED)),
+                Span::styled("  ↑↓ ", Style::default().fg(palette.olive)),
+                Span::styled("SELECT  ", Style::default().fg(palette.muted)),
+                Span::styled("ENTER ", Style::default().fg(palette.olive)),
+                Span::styled("DETAIL  ", Style::default().fg(palette.muted)),
+                Span::styled("F ", Style::default().fg(palette.olive)),
+                Span::styled("FILTER  ", Style::default().fg(palette.muted)),
+                Span::styled("Q ", Style::default().fg(palette.olive)),
+                Span::styled("QUIT", Style::default().fg(palette.muted)),
             ]),
             Line::from(vec![
-                Span::styled("  TAB ", Style::default().fg(theme::OLIVE)),
-                Span::styled("PANEL  ", Style::default().fg(theme::MUTED)),
-                Span::styled("C/M ", Style::default().fg(theme::OLIVE)),
-                Span::styled("SORT  ", Style::default().fg(theme::MUTED)),
-                Span::styled("K/⇧K ", Style::default().fg(theme::YELLOW)),
-                Span::styled("ACTION  ", Style::default().fg(theme::MUTED)),
-                Span::styled("R ", Style::default().fg(theme::OLIVE)),
-                Span::styled("REFRESH", Style::default().fg(theme::MUTED)),
+                Span::styled("  TAB ", Style::default().fg(palette.olive)),
+                Span::styled("PANEL  ", Style::default().fg(palette.muted)),
+                Span::styled("C/M ", Style::default().fg(palette.olive)),
+                Span::styled("SORT  ", Style::default().fg(palette.muted)),
+                Span::styled("K/⇧K ", Style::default().fg(palette.yellow)),
+                Span::styled("ACTION  ", Style::default().fg(palette.muted)),
+                Span::styled("R ", Style::default().fg(palette.olive)),
+                Span::styled("REFRESH", Style::default().fg(palette.muted)),
             ]),
         ]
     } else {
         vec![Line::from(vec![
-            Span::styled("  TAB ", Style::default().fg(theme::OLIVE)),
-            Span::styled("PANEL   ", Style::default().fg(theme::MUTED)),
-            Span::styled("↑↓ ", Style::default().fg(theme::OLIVE)),
-            Span::styled("SELECT   ", Style::default().fg(theme::MUTED)),
-            Span::styled("ENTER ", Style::default().fg(theme::OLIVE)),
-            Span::styled("DETAIL   ", Style::default().fg(theme::MUTED)),
-            Span::styled("F ", Style::default().fg(theme::OLIVE)),
-            Span::styled("FILTER   ", Style::default().fg(theme::MUTED)),
-            Span::styled("C/M ", Style::default().fg(theme::OLIVE)),
-            Span::styled("SORT   ", Style::default().fg(theme::MUTED)),
-            Span::styled("K/⇧K ", Style::default().fg(theme::YELLOW)),
-            Span::styled("ACTION   ", Style::default().fg(theme::MUTED)),
-            Span::styled("R ", Style::default().fg(theme::OLIVE)),
-            Span::styled("REFRESH   ", Style::default().fg(theme::MUTED)),
-            Span::styled("Q ", Style::default().fg(theme::OLIVE)),
-            Span::styled("QUIT", Style::default().fg(theme::MUTED)),
+            Span::styled("  TAB ", Style::default().fg(palette.olive)),
+            Span::styled("PANEL   ", Style::default().fg(palette.muted)),
+            Span::styled("↑↓ ", Style::default().fg(palette.olive)),
+            Span::styled("SELECT   ", Style::default().fg(palette.muted)),
+            Span::styled("ENTER ", Style::default().fg(palette.olive)),
+            Span::styled("DETAIL   ", Style::default().fg(palette.muted)),
+            Span::styled("F ", Style::default().fg(palette.olive)),
+            Span::styled("FILTER   ", Style::default().fg(palette.muted)),
+            Span::styled("C/M ", Style::default().fg(palette.olive)),
+            Span::styled("SORT   ", Style::default().fg(palette.muted)),
+            Span::styled("K/⇧K ", Style::default().fg(palette.yellow)),
+            Span::styled("ACTION   ", Style::default().fg(palette.muted)),
+            Span::styled("R ", Style::default().fg(palette.olive)),
+            Span::styled("REFRESH   ", Style::default().fg(palette.muted)),
+            Span::styled("Q ", Style::default().fg(palette.olive)),
+            Span::styled("QUIT", Style::default().fg(palette.muted)),
         ])]
     };
     frame.render_widget(
-        Paragraph::new(lines).style(Style::default().bg(theme::PANEL)),
+        Paragraph::new(lines).style(Style::default().bg(palette.panel)),
         area,
     );
 }
@@ -457,6 +472,7 @@ pub fn detail_modal(frame: &mut Frame, area: Rect, app: &App) {
     if popup.width < 4 || popup.height < 4 {
         return;
     }
+    let palette = app.ui.theme.palette();
     frame.render_widget(Clear, popup);
     let lines = vec![
         Line::from(format!(
@@ -490,14 +506,14 @@ pub fn detail_modal(frame: &mut Frame, area: Rect, app: &App) {
         Line::from(""),
         Line::from(Span::styled(
             "  ESC CLOSE   K TERMINATE   SHIFT+K KILL",
-            Style::default().fg(theme::OLIVE),
+            Style::default().fg(palette.olive),
         )),
     ];
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" PROCESS DETAIL ")
-        .border_style(Style::default().fg(theme::OLIVE))
-        .style(Style::default().fg(theme::TEXT).bg(theme::PANEL));
+        .border_style(Style::default().fg(palette.olive))
+        .style(Style::default().fg(palette.text).bg(palette.panel));
     frame.render_widget(
         Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
         popup,
@@ -512,6 +528,7 @@ pub fn confirmation_modal(frame: &mut Frame, area: Rect, app: &App) {
     if popup.width < 4 || popup.height < 4 {
         return;
     }
+    let palette = app.ui.theme.palette();
     let name = app
         .snapshot
         .as_ref()
@@ -532,22 +549,28 @@ pub fn confirmation_modal(frame: &mut Frame, area: Rect, app: &App) {
         Line::from(""),
         Line::from(Span::styled(
             format!("{action} PROCESS?"),
-            Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(palette.red)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(format!("{name}  /  PID {}", pending.identity().pid)),
         Line::from(""),
         Line::from(Span::styled(
             "Y  CONFIRM       N / ESC  CANCEL",
-            Style::default().fg(theme::YELLOW),
+            Style::default().fg(palette.yellow),
         )),
     ];
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" CONFIRM ACTION ")
-        .title_style(Style::default().fg(theme::RED).add_modifier(Modifier::BOLD))
-        .border_style(Style::default().fg(theme::RED))
-        .style(Style::default().fg(theme::TEXT).bg(theme::PANEL));
+        .title_style(
+            Style::default()
+                .fg(palette.red)
+                .add_modifier(Modifier::BOLD),
+        )
+        .border_style(Style::default().fg(palette.red))
+        .style(Style::default().fg(palette.text).bg(palette.panel));
     frame.render_widget(
         Paragraph::new(lines)
             .block(block)
@@ -585,37 +608,62 @@ fn disk_usage(snapshot: &SystemSnapshot) -> Option<f64> {
     })
 }
 
-fn disk_capacity(snapshot: Option<&SystemSnapshot>) -> String {
-    let Some(snapshot) = snapshot else {
-        return "N/A".into();
-    };
-    let metric = snapshot
-        .metrics
-        .iter()
-        .find(|metric| metric.name == "disk./.total")
-        .or_else(|| {
-            snapshot
-                .metrics
-                .iter()
-                .find(|metric| metric.name.starts_with("disk.") && metric.name.ends_with(".total"))
-        });
-    metric
-        .and_then(|metric| metric.value)
-        .map(|total| format!("{} TOTAL", bytes(total as u64)))
-        .unwrap_or_else(|| "N/A".into())
+fn disk_metric(snapshot: &SystemSnapshot, suffix: &str) -> Option<f64> {
+    value(snapshot, &format!("disk./.{suffix}")).or_else(|| {
+        snapshot
+            .metrics
+            .iter()
+            .find(|metric| {
+                metric.name.starts_with("disk.") && metric.name.ends_with(&format!(".{suffix}"))
+            })
+            .and_then(|metric| metric.value)
+    })
 }
 
-fn memory_capacity(snapshot: Option<&SystemSnapshot>) -> String {
+fn cpu_detail(snapshot: Option<&SystemSnapshot>) -> String {
     let Some(snapshot) = snapshot else {
-        return "N/A".into();
+        return "CORES N/A · IDLE N/A".into();
     };
-    match (
-        value(snapshot, "memory.used"),
-        value(snapshot, "memory.total"),
-    ) {
-        (Some(used), Some(total)) => format!("{} / {}", bytes(used as u64), bytes(total as u64)),
-        _ => "N/A".into(),
-    }
+    let cores = value(snapshot, "cpu.cores")
+        .map(|cores| format!("{cores:.0} CORES"))
+        .unwrap_or_else(|| "CORES N/A".into());
+    let idle = value(snapshot, "cpu.idle")
+        .map(|idle| format!("IDLE {idle:.0}%"))
+        .unwrap_or_else(|| "IDLE N/A".into());
+    format!("{cores} · {idle}")
+}
+
+fn memory_detail(snapshot: Option<&SystemSnapshot>) -> String {
+    let Some(snapshot) = snapshot else {
+        return "USED N/A · FREE N/A".into();
+    };
+    let used = value(snapshot, "memory.used").map(|value| bytes(value as u64));
+    let free = value(snapshot, "memory.free").map(|value| bytes(value as u64));
+    let available = value(snapshot, "memory.available").map(|value| bytes(value as u64));
+    format!(
+        "USED {} · FREE {} · AVAIL {}",
+        used.unwrap_or_else(|| "N/A".into()),
+        free.unwrap_or_else(|| "N/A".into()),
+        available.unwrap_or_else(|| "N/A".into())
+    )
+}
+
+fn disk_detail(snapshot: Option<&SystemSnapshot>) -> String {
+    let Some(snapshot) = snapshot else {
+        return "USED N/A · FREE N/A".into();
+    };
+    format!(
+        "USED {} · FREE {} · TOTAL {}",
+        disk_metric(snapshot, "used")
+            .map(|value| bytes(value as u64))
+            .unwrap_or_else(|| "N/A".into()),
+        disk_metric(snapshot, "free")
+            .map(|value| bytes(value as u64))
+            .unwrap_or_else(|| "N/A".into()),
+        disk_metric(snapshot, "total")
+            .map(|value| bytes(value as u64))
+            .unwrap_or_else(|| "N/A".into())
+    )
 }
 
 fn network_rates(snapshot: &SystemSnapshot) -> (Option<f64>, Option<f64>) {
@@ -669,12 +717,12 @@ fn format_uptime(seconds: u64) -> String {
     }
 }
 
-fn usage_color(value: f64) -> ratatui::style::Color {
+fn usage_color(value: f64, palette: &theme::Palette) -> ratatui::style::Color {
     if value >= 85.0 {
-        theme::RED
+        palette.red
     } else if value >= 70.0 {
-        theme::YELLOW
+        palette.yellow
     } else {
-        theme::GREEN
+        palette.green
     }
 }

@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent, MouseEventKind};
 
+use super::theme::Theme;
 use crate::app::Panel;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -85,6 +86,7 @@ pub struct UiState {
     pub hidden_panels: HashSet<Panel>,
     pub scroll_offsets: HashMap<Panel, u16>,
     pub menu_open: bool,
+    pub theme: Theme,
 }
 
 impl Default for UiState {
@@ -95,6 +97,7 @@ impl Default for UiState {
             hidden_panels: HashSet::new(),
             scroll_offsets: HashMap::new(),
             menu_open: false,
+            theme: Theme::Forest,
         }
     }
 }
@@ -132,6 +135,10 @@ impl UiState {
             KeyCode::Char('m' | 'M') => {
                 self.menu_open = !self.menu_open;
                 UiCommand::OpenMenu
+            }
+            KeyCode::Char('t' | 'T') => {
+                self.theme = self.theme.next();
+                UiCommand::Noop
             }
             KeyCode::PageUp => UiCommand::Scroll(focused, -8),
             KeyCode::PageDown => UiCommand::Scroll(focused, 8),

@@ -15,7 +15,7 @@ use crate::model::AppMode;
 pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
     frame.render_widget(
-        Block::default().style(Style::default().bg(theme::BACKGROUND)),
+        Block::default().style(Style::default().bg(app.ui.theme.palette().background)),
         area,
     );
     let (header, resource, detail, footer) = match app.ui.density {

@@ -61,6 +61,12 @@ impl Collector for SystemCollector {
         let cpu_value = (!self.system.cpus().is_empty() && self.previous_at.is_some())
             .then(|| f64::from(self.system.global_cpu_usage()));
         metric(&mut result, "cpu.usage", cpu_value, "%");
+        metric(
+            &mut result,
+            "cpu.idle",
+            cpu_value.map(|usage| (100.0 - usage).max(0.0)),
+            "%",
+        );
         if self.system.cpus().is_empty() {
             warning(&mut result, "CPU data unavailable");
         }
@@ -85,6 +91,19 @@ impl Collector for SystemCollector {
             (total > 0).then_some(used as f64),
             "B",
         );
+        metric(
+            &mut result,
+            "memory.available",
+            (total > 0).then_some(self.system.available_memory() as f64),
+            "B",
+        );
+        metric(
+            &mut result,
+            "memory.free",
+            (total > 0).then_some(self.system.free_memory() as f64),
+            "B",
+        );
+        metric(&mut result, "memory.cached", None, "B");
         metric(&mut result, "memory.usage", percentage(used, total), "%");
         if total == 0 {
             warning(&mut result, "memory capacity unavailable");
@@ -109,6 +128,12 @@ impl Collector for SystemCollector {
                 &mut result,
                 &format!("disk.{mount}.used"),
                 (total > 0).then_some(used as f64),
+                "B",
+            );
+            metric(
+                &mut result,
+                &format!("disk.{mount}.free"),
+                (total > 0).then_some(disk.available_space() as f64),
                 "B",
             );
             metric(
