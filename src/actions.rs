@@ -10,6 +10,7 @@ pub enum ActionError {
     PermissionDenied,
     ProcessNotFound,
     SelectionChanged,
+    SelfTarget,
     OsFailure(String),
 }
 
@@ -19,6 +20,7 @@ impl ActionError {
             Self::PermissionDenied => "Process permission denied.".to_owned(),
             Self::ProcessNotFound => "The process is no longer running.".to_owned(),
             Self::SelectionChanged => "The selected process changed; select it again.".to_owned(),
+            Self::SelfTarget => "Filiz cannot send a signal to itself.".to_owned(),
             Self::OsFailure(reason) => format!("Process action failed: {reason}"),
         }
     }
@@ -38,6 +40,9 @@ impl ProcessAction {
     /// Execute only after the UI turns a pending selection into a confirmed action.
     pub fn execute(action: ConfirmedAction) -> Result<(), ActionError> {
         let identity = action.identity();
+        if identity.pid == std::process::id() {
+            return Err(ActionError::SelfTarget);
+        }
         let pid = Pid::from_u32(identity.pid);
         let mut system = System::new();
         system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
@@ -62,6 +67,9 @@ impl ProcessAction {
 }
 
 fn send_signal(pid: u32, signal: libc::c_int) -> Result<(), ActionError> {
+    if pid == std::process::id() {
+        return Err(ActionError::SelfTarget);
+    }
     let pid = libc::pid_t::try_from(pid).map_err(|_| ActionError::ProcessNotFound)?;
     if pid <= 0 {
         return Err(ActionError::ProcessNotFound);

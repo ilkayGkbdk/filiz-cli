@@ -66,7 +66,7 @@ fn confirmed_action_rejects_a_missing_process_without_signalling() {
 }
 
 #[test]
-fn confirmed_action_rejects_pid_reuse_without_signalling() {
+fn confirmed_action_rejects_self_target_before_identity_lookup() {
     let current_pid = sysinfo::get_current_pid().expect("current PID").as_u32();
     let confirmed = PendingAction::new(
         ProcessIdentity {
@@ -78,7 +78,7 @@ fn confirmed_action_rejects_pid_reuse_without_signalling() {
     .confirm();
     assert_eq!(
         ProcessAction::execute(confirmed),
-        Err(ActionError::SelectionChanged)
+        Err(ActionError::SelfTarget)
     );
 }
 
@@ -92,6 +92,34 @@ fn invalid_pid_is_a_typed_error_without_signalling() {
         ProcessAction::kill(u32::MAX),
         Err(ActionError::ProcessNotFound)
     );
+}
+
+#[test]
+fn self_targeted_actions_return_a_typed_error_without_signalling() {
+    let current_pid = std::process::id();
+    for kind in [ActionKind::Terminate, ActionKind::Kill] {
+        let confirmed = PendingAction::new(
+            ProcessIdentity {
+                pid: current_pid,
+                start_time: 0,
+            },
+            kind,
+        )
+        .confirm();
+        assert_eq!(
+            ProcessAction::execute(confirmed),
+            Err(ActionError::SelfTarget)
+        );
+    }
+    assert_eq!(
+        ProcessAction::terminate(current_pid),
+        Err(ActionError::SelfTarget)
+    );
+    assert_eq!(
+        ProcessAction::kill(current_pid),
+        Err(ActionError::SelfTarget)
+    );
+    assert!(ActionError::SelfTarget.to_user_message().contains("itself"));
 }
 
 #[cfg(target_os = "macos")]

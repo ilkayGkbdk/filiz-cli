@@ -307,8 +307,24 @@ pub fn details(frame: &mut Frame, area: Rect, app: &App) {
         .snapshot
         .as_ref()
         .and_then(|snapshot| snapshot.warnings.first());
-    let lines = if let Some(process) = selected {
-        vec![
+    let mut lines = Vec::new();
+    if let Some(notice) = &app.notice {
+        lines.push(Line::from(Span::styled(
+            format!(" EVENT  {notice}"),
+            Style::default()
+                .fg(theme::YELLOW)
+                .add_modifier(Modifier::BOLD),
+        )));
+    } else if let Some(warning) = warning {
+        lines.push(Line::from(Span::styled(
+            format!(" WARNING  {}: {}", warning.collector, warning.message),
+            Style::default()
+                .fg(theme::YELLOW)
+                .add_modifier(Modifier::BOLD),
+        )));
+    }
+    if let Some(process) = selected {
+        lines.extend([
             Line::from(vec![
                 Span::styled(" PROCESS  ", Style::default().fg(theme::MUTED)),
                 Span::styled(
@@ -332,21 +348,9 @@ pub fn details(frame: &mut Frame, area: Rect, app: &App) {
                 Span::styled("   STATE  ", Style::default().fg(theme::MUTED)),
                 Span::raw(process.status.unwrap_or_else(|| "N/A".into())),
             ]),
-        ]
+        ]);
     } else {
-        vec![Line::from(" No process selected")]
-    };
-    let mut lines = lines;
-    if let Some(notice) = &app.notice {
-        lines.push(Line::from(Span::styled(
-            format!(" EVENT  {notice}"),
-            Style::default().fg(theme::YELLOW),
-        )));
-    } else if let Some(warning) = warning {
-        lines.push(Line::from(Span::styled(
-            format!(" WARNING  {}: {}", warning.collector, warning.message),
-            Style::default().fg(theme::YELLOW),
-        )));
+        lines.push(Line::from(" No process selected"));
     }
     let block = Block::default()
         .borders(Borders::ALL)

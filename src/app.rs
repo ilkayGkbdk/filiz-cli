@@ -142,6 +142,20 @@ mod tests {
         app.replace_snapshot(snapshot);
         assert_eq!(app.histories[3].last(), Some(&200_000));
     }
+
+    #[test]
+    fn self_process_does_not_enter_action_confirmation() {
+        let mut app = app_with_processes();
+        let self_pid = std::process::id();
+        let mut snapshot = app.snapshot.as_ref().unwrap().clone();
+        snapshot.processes = vec![process(self_pid, 1.0)];
+        app.replace_snapshot(snapshot);
+
+        assert_eq!(app.handle_key(key(KeyCode::Char('k'))), AppCommand::Noop);
+        assert_eq!(app.mode, AppMode::Dashboard);
+        assert!(app.pending_action.is_none());
+        assert!(app.notice.as_deref().unwrap_or_default().contains("itself"));
+    }
 }
 use std::io::Stdout;
 use std::time::{Duration, Instant};
@@ -229,10 +243,12 @@ impl App {
         .into_iter()
         .enumerate()
         {
-            let history = &mut self.histories[index];
-            history.push(value.unwrap_or(0.0).clamp(0.0, u64::MAX as f64) as u64);
-            if history.len() > 48 {
-                history.remove(0);
+            if let Some(value) = value {
+                let history = &mut self.histories[index];
+                history.push(value.clamp(0.0, u64::MAX as f64) as u64);
+                if history.len() > 48 {
+                    history.remove(0);
+                }
             }
         }
         self.snapshot = Some(snapshot);
@@ -339,6 +355,10 @@ impl App {
             }
             KeyCode::Char('k' | 'K') => {
                 if let Some(process) = self.selected_process() {
+                    if process.identity.pid == std::process::id() {
+                        self.show_notice("Filiz cannot send a signal to itself.");
+                        return AppCommand::Noop;
+                    }
                     let kind = if key.modifiers.contains(KeyModifiers::SHIFT)
                         || key.code == KeyCode::Char('K')
                     {
