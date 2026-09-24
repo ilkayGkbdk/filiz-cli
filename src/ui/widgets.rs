@@ -328,7 +328,7 @@ pub fn network(frame: &mut Frame, area: Rect, app: &App) {
         .map(|snapshot| snapshot.network_summaries.as_slice())
         .unwrap_or(&[]);
     let sections = Layout::vertical([
-        Constraint::Length(4),
+        Constraint::Length(6),
         Constraint::Length(7),
         Constraint::Min(0),
     ])
@@ -351,6 +351,7 @@ pub fn network(frame: &mut Frame, area: Rect, app: &App) {
             Some(download)
         }),
         palette.green,
+        &app.histories[3],
         &palette,
     );
     network_card(
@@ -363,6 +364,7 @@ pub fn network(frame: &mut Frame, area: Rect, app: &App) {
             Some(upload)
         }),
         palette.olive,
+        &app.histories[3],
         &palette,
     );
     let rows = summaries.iter().map(network_row).collect::<Vec<_>>();
@@ -600,6 +602,7 @@ fn network_card(
     title: &str,
     main: String,
     color: ratatui::style::Color,
+    history: &Vec<u64>,
     palette: &theme::Palette,
 ) {
     let block = Block::default()
@@ -623,6 +626,19 @@ fn network_card(
         ),
         inner,
     );
+    if inner.height > 1 && !history.is_empty() {
+        frame.render_widget(
+            Sparkline::default()
+                .data(history)
+                .max(history.iter().copied().max().unwrap_or(1).max(1))
+                .style(Style::default().fg(color).bg(palette.panel)),
+            Rect {
+                y: inner.y + 1,
+                height: inner.height - 1,
+                ..inner
+            },
+        );
+    }
 }
 
 fn network_row(summary: &NetworkSummary) -> Row<'static> {
