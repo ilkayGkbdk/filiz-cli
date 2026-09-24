@@ -18,6 +18,14 @@ files are used for README, release, and installer surfaces. The runtime
 terminal banner will use an ANSI/Unicode conversion so it remains compatible
 with ordinary terminals.
 
+The startup splash uses `assets/logo.ansi`, generated from the master PNG with
+Chafa. To regenerate it after changing the logo:
+
+```sh
+brew install chafa
+chafa -f symbols -c 256 -s 32x12 assets/logo.png > assets/logo.ansi
+```
+
 ## Install
 
 With Rust installed:
