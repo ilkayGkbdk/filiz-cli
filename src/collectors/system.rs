@@ -3,7 +3,9 @@ use std::time::Instant;
 
 use sysinfo::{Disks, Networks, System};
 
-use crate::model::{CollectorData, CollectorResult, CollectorWarning, ResourceMetric};
+use crate::model::{
+    CollectorData, CollectorResult, CollectorWarning, NetworkSummary, ResourceMetric,
+};
 
 use super::Collector;
 
@@ -24,8 +26,18 @@ pub struct SystemCollector {
     system: System,
     disks: Disks,
     networks: Networks,
-    previous_networks: HashMap<String, (u64, u64)>,
+    previous_networks: HashMap<String, NetworkState>,
     previous_at: Option<Instant>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct NetworkState {
+    received: u64,
+    transmitted: u64,
+    baseline_received: u64,
+    baseline_transmitted: u64,
+    peak_received: f64,
+    peak_transmitted: f64,
 }
 
 impl SystemCollector {
@@ -162,10 +174,10 @@ impl Collector for SystemCollector {
             let previous = self.previous_networks.get(name);
             let rx_rate = previous
                 .zip(elapsed)
-                .and_then(|((rx, _), seconds)| byte_rate(*rx, received, seconds));
+                .and_then(|(state, seconds)| byte_rate(state.received, received, seconds));
             let tx_rate = previous
                 .zip(elapsed)
-                .and_then(|((_, tx), seconds)| byte_rate(*tx, transmitted, seconds));
+                .and_then(|(state, seconds)| byte_rate(state.transmitted, transmitted, seconds));
             metric(
                 &mut result,
                 &format!("network.{name}.received"),
@@ -178,7 +190,43 @@ impl Collector for SystemCollector {
                 tx_rate,
                 "B/s",
             );
-            current_networks.insert(name.clone(), (received, transmitted));
+            let mut state = previous.copied().unwrap_or(NetworkState {
+                received,
+                transmitted,
+                baseline_received: received,
+                baseline_transmitted: transmitted,
+                peak_received: 0.0,
+                peak_transmitted: 0.0,
+            });
+            if received < state.received {
+                state.baseline_received = received;
+                state.peak_received = 0.0;
+            }
+            if transmitted < state.transmitted {
+                state.baseline_transmitted = transmitted;
+                state.peak_transmitted = 0.0;
+            }
+            let download_rate = rx_rate;
+            let upload_rate = tx_rate;
+            if let Some(rate) = download_rate {
+                state.peak_received = state.peak_received.max(rate);
+            }
+            if let Some(rate) = upload_rate {
+                state.peak_transmitted = state.peak_transmitted.max(rate);
+            }
+            result.network_summaries.push(NetworkSummary {
+                interface: name.clone(),
+                download_rate,
+                upload_rate,
+                download_total: received.saturating_sub(state.baseline_received),
+                upload_total: transmitted.saturating_sub(state.baseline_transmitted),
+                peak_download: state.peak_received,
+                peak_upload: state.peak_transmitted,
+                connections: Vec::new(),
+            });
+            state.received = received;
+            state.transmitted = transmitted;
+            current_networks.insert(name.clone(), state);
         }
         self.previous_networks = current_networks;
         self.previous_at = Some(now);

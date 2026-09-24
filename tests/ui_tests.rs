@@ -42,6 +42,7 @@ fn sample_app() -> App {
             user: Some("user".into()),
             status: Some("Running".into()),
         }],
+        network_summaries: Vec::new(),
         events: Vec::new(),
         warnings: Vec::new(),
     });

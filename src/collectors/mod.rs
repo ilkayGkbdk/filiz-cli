@@ -4,7 +4,7 @@ pub mod system;
 
 use std::time::SystemTime;
 
-use crate::model::{CollectorResult, SystemSnapshot};
+use crate::model::{CollectorResult, NetworkSummary, SystemSnapshot};
 use macos::MacOsCollector;
 use processes::ProcessCollector;
 use system::SystemCollector;
@@ -37,12 +37,14 @@ fn snapshot_from_collectors(collectors: &mut [&mut dyn Collector]) -> SystemSnap
     let captured_at = SystemTime::now();
     let mut metrics = Vec::new();
     let mut process_list = Vec::new();
+    let mut network_summaries = Vec::<NetworkSummary>::new();
     let mut warnings = Vec::new();
     for collector in collectors {
         match collector.collect() {
             Ok(section) => {
                 metrics.extend(section.metrics);
                 process_list.extend(section.processes);
+                network_summaries.extend(section.network_summaries);
                 warnings.extend(section.warnings);
             }
             Err(warning) => warnings.push(warning),
@@ -53,6 +55,7 @@ fn snapshot_from_collectors(collectors: &mut [&mut dyn Collector]) -> SystemSnap
         captured_at,
         metrics,
         processes: process_list,
+        network_summaries,
         events: Vec::new(),
         warnings,
     }

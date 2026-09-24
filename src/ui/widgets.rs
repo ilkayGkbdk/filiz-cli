@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::app::{App, Panel};
-use crate::model::{ActionKind, AppMode, ProcessInfo, SortMode, SystemSnapshot};
+use crate::model::{ActionKind, AppMode, NetworkSummary, ProcessInfo, SortMode, SystemSnapshot};
 
 use super::theme;
 
@@ -294,6 +294,144 @@ pub fn processes(frame: &mut Frame, area: Rect, app: &App) {
         state.select(Some(app.selected_index));
     }
     frame.render_stateful_widget(table, area, &mut state);
+}
+
+pub fn network(frame: &mut Frame, area: Rect, app: &App) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+    let palette = app.ui.theme.palette();
+    let summaries = app
+        .snapshot
+        .as_ref()
+        .map(|snapshot| snapshot.network_summaries.as_slice())
+        .unwrap_or(&[]);
+    let columns =
+        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(area);
+    let (download, upload) = summaries.iter().fold((0.0, 0.0), |(down, up), item| {
+        (
+            down + item.download_rate.unwrap_or(0.0),
+            up + item.upload_rate.unwrap_or(0.0),
+        )
+    });
+    network_card(
+        frame,
+        columns[0],
+        "DOWNLOAD",
+        rate_or_na(if summaries.is_empty() {
+            None
+        } else {
+            Some(download)
+        }),
+        palette.green,
+        &palette,
+    );
+    network_card(
+        frame,
+        columns[1],
+        "UPLOAD",
+        rate_or_na(if summaries.is_empty() {
+            None
+        } else {
+            Some(upload)
+        }),
+        palette.olive,
+        &palette,
+    );
+    let body = Rect {
+        y: area.y.saturating_add(4),
+        height: area.height.saturating_sub(4),
+        ..area
+    };
+    let rows = summaries.iter().map(network_row).collect::<Vec<_>>();
+    let table = Table::new(
+        if rows.is_empty() {
+            vec![Row::new(["No network interfaces", "", "", "", ""])]
+        } else {
+            rows
+        },
+        [
+            Constraint::Length(14),
+            Constraint::Length(14),
+            Constraint::Length(14),
+            Constraint::Length(14),
+            Constraint::Min(12),
+        ],
+    )
+    .header(
+        Row::new(["INTERFACE", "DOWN", "UP", "TOTAL", "PEAK"]).style(
+            Style::default()
+                .fg(palette.muted)
+                .add_modifier(Modifier::BOLD),
+        ),
+    )
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" NETWORK / DOWNLOAD ")
+            .title_style(Style::default().fg(palette.olive))
+            .border_style(Style::default().fg(palette.border))
+            .style(Style::default().bg(palette.panel)),
+    )
+    .style(Style::default().fg(palette.text))
+    .column_spacing(1);
+    frame.render_widget(table, body);
+}
+
+fn network_card(
+    frame: &mut Frame,
+    area: Rect,
+    title: &str,
+    main: String,
+    color: ratatui::style::Color,
+    palette: &theme::Palette,
+) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" {title} "))
+        .title_style(
+            Style::default()
+                .fg(palette.muted)
+                .add_modifier(Modifier::BOLD),
+        )
+        .border_style(Style::default().fg(palette.border))
+        .style(Style::default().bg(palette.panel));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    frame.render_widget(
+        Paragraph::new(main).style(
+            Style::default()
+                .fg(color)
+                .bg(palette.panel)
+                .add_modifier(Modifier::BOLD),
+        ),
+        inner,
+    );
+}
+
+fn network_row(summary: &NetworkSummary) -> Row<'static> {
+    let total = summary.download_total.saturating_add(summary.upload_total);
+    Row::new([
+        summary.interface.clone(),
+        summary
+            .download_rate
+            .map(rate)
+            .unwrap_or_else(|| "N/A".into()),
+        summary
+            .upload_rate
+            .map(rate)
+            .unwrap_or_else(|| "N/A".into()),
+        bytes(total),
+        format!(
+            "↓ {} ↑ {}",
+            rate(summary.peak_download),
+            rate(summary.peak_upload)
+        ),
+    ])
+}
+
+fn rate_or_na(value: Option<f64>) -> String {
+    value.map(rate).unwrap_or_else(|| "N/A".into())
 }
 
 fn process_row(process: &ProcessInfo, wide: bool, palette: &theme::Palette) -> Row<'static> {

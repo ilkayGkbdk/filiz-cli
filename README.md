@@ -5,8 +5,8 @@
 </p>
 
 Filiz is a live macOS system monitor for the terminal. It combines a readable
-resource dashboard with a process table and explicit confirmation for process
-actions.
+resource dashboard, workspace-based navigation, network/download visibility,
+and explicit confirmation for process actions.
 
 The first release targets macOS only and is currently developed in a private
 repository.
@@ -53,9 +53,10 @@ show `N/A` when macOS does not expose them on a particular machine.
 
 ## What it shows
 
-- CPU usage, core count, and live history
-- Memory and disk usage
-- Network receive/transmit rates
+- CPU usage, idle percentage, core count, and live history
+- Memory used, free, available, and total capacity
+- Disk used, free, total capacity, and usage thresholds
+- Network/download and upload rates, session totals, peaks, and interfaces
 - Battery, uptime, and temperature when available
 - Processes sorted by CPU or memory
 - Process detail and text filtering
@@ -66,6 +67,13 @@ show `N/A` when macOS does not expose them on a particular machine.
 | Key | Action |
 | --- | --- |
 | `Tab` | Change focused panel |
+| `1`–`5` | Switch Overview, Processes, Network, Disks, or More workspace |
+| `←` / `→` | Move between workspaces |
+| `H` | Hide/show the focused panel |
+| `L` | Cycle compact, balanced, and spacious layout |
+| `T` | Cycle Forest, Amber, Mono, and Solarized themes |
+| `M` | Open/close the menu state |
+| Mouse wheel | Scroll the focused panel |
 | `↑` / `↓` | Select a process |
 | `Enter` | Open process detail |
 | `F` | Filter processes |
@@ -74,6 +82,10 @@ show `N/A` when macOS does not expose them on a particular machine.
 | `Y` | Confirm a pending process action |
 | `N` / `Esc` | Cancel or close |
 | `Q` | Quit |
+
+The Network workspace (`3`) keeps current download/upload rates visible even
+when the terminal is narrow. Mouse scrolling is enabled inside the alternate
+screen; keyboard navigation remains available as a fallback.
 
 Every refresh is read-only until a process action is explicitly confirmed.
 

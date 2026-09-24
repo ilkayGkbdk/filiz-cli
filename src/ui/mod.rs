@@ -11,6 +11,7 @@ use ratatui::{
 
 use crate::app::App;
 use crate::model::AppMode;
+use state::Workspace;
 
 pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
@@ -57,6 +58,16 @@ pub fn render(frame: &mut Frame, app: &App) {
     ])
     .split(area);
     widgets::status(frame, sections[0], app);
+    if app.ui.workspace == Workspace::Network {
+        widgets::network(frame, sections[1], app);
+        widgets::footer(frame, sections[4], app);
+        match app.mode {
+            AppMode::ProcessDetail => widgets::detail_modal(frame, area, app),
+            AppMode::ConfirmingAction => widgets::confirmation_modal(frame, area, app),
+            _ => {}
+        }
+        return;
+    }
     widgets::resources(frame, sections[1], app);
     widgets::processes(frame, sections[2], app);
     widgets::details(frame, sections[3], app);
@@ -102,6 +113,7 @@ mod tests {
                 user: Some("user".into()),
                 status: Some("Running".into()),
             }],
+            network_summaries: Vec::new(),
             events: Vec::new(),
             warnings: Vec::new(),
         });

@@ -126,7 +126,28 @@ pub struct CollectorWarning {
 pub struct CollectorData {
     pub metrics: Vec<ResourceMetric>,
     pub processes: Vec<ProcessInfo>,
+    pub network_summaries: Vec<NetworkSummary>,
     pub warnings: Vec<CollectorWarning>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConnectionSummary {
+    pub process: String,
+    pub remote: String,
+    pub direction: String,
+    pub bytes_per_second: Option<f64>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NetworkSummary {
+    pub interface: String,
+    pub download_rate: Option<f64>,
+    pub upload_rate: Option<f64>,
+    pub download_total: u64,
+    pub upload_total: u64,
+    pub peak_download: f64,
+    pub peak_upload: f64,
+    pub connections: Vec<ConnectionSummary>,
 }
 
 /// A collector failure is localized by snapshot assembly as a warning.
@@ -138,8 +159,13 @@ pub struct SystemSnapshot {
     pub captured_at: SystemTime,
     pub metrics: Vec<ResourceMetric>,
     pub processes: Vec<ProcessInfo>,
+    pub network_summaries: Vec<NetworkSummary>,
     pub events: Vec<SystemEvent>,
     pub warnings: Vec<CollectorWarning>,
+}
+
+pub fn network_summary(snapshot: &SystemSnapshot) -> Option<&NetworkSummary> {
+    snapshot.network_summaries.first()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

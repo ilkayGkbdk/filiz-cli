@@ -29,6 +29,7 @@ mod tests {
             captured_at: SystemTime::now(),
             metrics: Vec::new(),
             processes: vec![process(20, 10.0), process(10, 20.0)],
+            network_summaries: Vec::new(),
             events: Vec::new(),
             warnings: Vec::new(),
         });
