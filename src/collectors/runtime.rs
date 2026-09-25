@@ -29,10 +29,24 @@ pub struct CollectorRuntime {
 }
 
 /// Sends `Stopped` when a worker thread ends without a requested stop (e.g. panic).
-struct StopGuard {
+pub(crate) struct StopGuard {
     source: Source,
     updates: Sender<CollectorUpdate>,
     armed: bool,
+}
+
+impl StopGuard {
+    pub(crate) fn new(source: Source, updates: Sender<CollectorUpdate>) -> Self {
+        Self {
+            source,
+            updates,
+            armed: true,
+        }
+    }
+
+    pub(crate) fn disarm(&mut self) {
+        self.armed = false;
+    }
 }
 
 impl Drop for StopGuard {
@@ -48,7 +62,7 @@ impl CollectorRuntime {
         let mut system = SystemCollector::new();
         let mut processes = ProcessCollector::new();
         let mut platform = MacOsCollector::new();
-        Self::with_workers(
+        let mut runtime = Self::with_workers(
             vec![
                 WorkerSpec {
                     source: Source::System,
@@ -65,8 +79,13 @@ impl CollectorRuntime {
                     job: Box::new(move || CollectorUpdate::Platform(platform.sample())),
                 },
             ],
-            updates,
-        )
+            updates.clone(),
+        );
+        let (control, handle, killer) =
+            super::traffic::spawn(super::traffic::TrafficConfig::default(), updates);
+        runtime.adopt(control, handle);
+        runtime.add_child_killer(killer);
+        runtime
     }
 
     pub fn with_workers(workers: Vec<WorkerSpec>, updates: Sender<CollectorUpdate>) -> Self {
@@ -111,11 +130,7 @@ fn run_worker(
     updates: Sender<CollectorUpdate>,
     control: mpsc::Receiver<Control>,
 ) {
-    let mut guard = StopGuard {
-        source: worker.source,
-        updates: updates.clone(),
-        armed: true,
-    };
+    let mut guard = StopGuard::new(worker.source, updates.clone());
     loop {
         if updates.send((worker.job)()).is_err() {
             break;
@@ -145,7 +160,7 @@ fn run_worker(
             break;
         }
     }
-    guard.armed = false;
+    guard.disarm();
 }
 
 impl Drop for CollectorRuntime {
