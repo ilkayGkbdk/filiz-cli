@@ -170,6 +170,7 @@ mod tests {
     }
 }
 use std::io::Stdout;
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -177,7 +178,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifier
 use ratatui::{backend::CrosstermBackend, Terminal};
 
 use crate::actions::ProcessAction;
-use crate::collectors::CollectorSet;
+use crate::collectors::runtime::CollectorRuntime;
 use crate::history::History;
 use crate::model::{
     filter_processes, sort_processes, ActionKind, AppMode, ConfirmedAction, PendingAction,
@@ -506,6 +507,16 @@ impl App {
         self.notice_until = Some(Instant::now() + Duration::from_secs(5));
     }
 
+    /// Apply every queued collector update without blocking. Returns true if anything changed.
+    pub fn pump(&mut self, updates: &Receiver<CollectorUpdate>) -> bool {
+        let mut changed = false;
+        while let Ok(update) = updates.try_recv() {
+            self.apply_update(update);
+            changed = true;
+        }
+        changed
+    }
+
     fn clear_expired_notice(&mut self) -> bool {
         if self
             .notice_until
@@ -530,64 +541,53 @@ fn panel_label(panel: Panel) -> &'static str {
     }
 }
 
-pub fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> Result<()> {
-    let mut collectors = CollectorSet::new();
-    for update in collectors.collect_all() {
-        app.apply_update(update);
-    }
-    let mut last_refresh = Instant::now();
+pub fn run(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    app: &mut App,
+    runtime: CollectorRuntime,
+    updates: Receiver<CollectorUpdate>,
+) -> Result<()> {
+    const INPUT_WAIT: Duration = Duration::from_millis(50);
     let mut dirty = true;
     loop {
-        if dirty {
-            terminal.draw(|frame| ui::render(frame, app))?;
-            dirty = false;
-        }
-        if last_refresh.elapsed() >= app.refresh {
-            for update in collectors.collect_all() {
-                app.apply_update(update);
-            }
-            last_refresh = Instant::now();
+        if app.pump(&updates) {
             dirty = true;
         }
         if app.clear_expired_notice() {
             dirty = true;
         }
-        if event::poll(Duration::ZERO)? {
-            match event::read()? {
-                Event::Key(key) => {
-                    match app.handle_key(key) {
-                        AppCommand::Quit => break,
-                        AppCommand::Refresh => {
-                            for update in collectors.collect_all() {
-                                app.apply_update(update);
-                            }
-                            last_refresh = Instant::now();
+        if dirty {
+            terminal.draw(|frame| ui::render(frame, app))?;
+            dirty = false;
+        }
+        if !event::poll(INPUT_WAIT)? {
+            continue;
+        }
+        match event::read()? {
+            Event::Key(key) => {
+                match app.handle_key(key) {
+                    AppCommand::Quit => break,
+                    AppCommand::Refresh => runtime.refresh(),
+                    AppCommand::ConfirmAction(action) => {
+                        let pid = action.identity().pid;
+                        match ProcessAction::execute(action) {
+                            Ok(()) => app.show_notice(format!("Signal sent to PID {pid}.")),
+                            Err(error) => app.show_notice(error.to_user_message()),
                         }
-                        AppCommand::ConfirmAction(action) => {
-                            let pid = action.identity().pid;
-                            match ProcessAction::execute(action) {
-                                Ok(()) => app.show_notice(format!("Signal sent to PID {pid}.")),
-                                Err(error) => app.show_notice(error.to_user_message()),
-                            }
-                            for update in collectors.collect_all() {
-                                app.apply_update(update);
-                            }
-                            last_refresh = Instant::now();
-                        }
-                        _ => {}
+                        runtime.refresh();
                     }
-                    dirty = true;
+                    _ => {}
                 }
-                Event::Mouse(mouse) => {
-                    app.handle_mouse(mouse);
-                    dirty = true;
-                }
-                Event::Resize(_, _) => dirty = true,
-                _ => {}
+                dirty = true;
             }
-        } else {
-            std::thread::sleep(Duration::from_millis(25));
+            Event::Mouse(mouse) => {
+                app.handle_mouse(mouse);
+                dirty = true;
+            }
+            Event::Resize(_, _) => dirty = true,
+            _ => {}
         }
     }
+    drop(runtime);
     Ok(())
 }

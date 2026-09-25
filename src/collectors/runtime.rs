@@ -1,0 +1,143 @@
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::thread::JoinHandle;
+use std::time::Duration;
+
+use crate::state::{CollectorUpdate, Source};
+
+use super::macos::MacOsCollector;
+use super::processes::ProcessCollector;
+use super::system::SystemCollector;
+
+pub type Job = Box<dyn FnMut() -> CollectorUpdate + Send>;
+
+pub struct WorkerSpec {
+    pub source: Source,
+    pub interval: Duration,
+    pub job: Job,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Control {
+    Refresh,
+    Stop,
+}
+
+pub struct CollectorRuntime {
+    controls: Vec<Sender<Control>>,
+    handles: Vec<JoinHandle<()>>,
+    child_killers: Vec<Box<dyn FnOnce() + Send>>,
+}
+
+/// Sends `Stopped` when a worker thread ends without a requested stop (e.g. panic).
+struct StopGuard {
+    source: Source,
+    updates: Sender<CollectorUpdate>,
+    armed: bool,
+}
+
+impl Drop for StopGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = self.updates.send(CollectorUpdate::Stopped(self.source));
+        }
+    }
+}
+
+impl CollectorRuntime {
+    pub fn start(updates: Sender<CollectorUpdate>) -> Self {
+        let mut system = SystemCollector::new();
+        let mut processes = ProcessCollector::new();
+        let mut platform = MacOsCollector::new();
+        Self::with_workers(
+            vec![
+                WorkerSpec {
+                    source: Source::System,
+                    interval: Duration::from_secs(2),
+                    job: Box::new(move || {
+                        let mut sample = system.sample();
+                        sample.processes = processes.sample();
+                        CollectorUpdate::System(sample)
+                    }),
+                },
+                WorkerSpec {
+                    source: Source::Platform,
+                    interval: Duration::from_secs(5),
+                    job: Box::new(move || CollectorUpdate::Platform(platform.sample())),
+                },
+            ],
+            updates,
+        )
+    }
+
+    pub fn with_workers(workers: Vec<WorkerSpec>, updates: Sender<CollectorUpdate>) -> Self {
+        let mut runtime = Self {
+            controls: Vec::new(),
+            handles: Vec::new(),
+            child_killers: Vec::new(),
+        };
+        for worker in workers {
+            let (control_tx, control_rx) = mpsc::channel();
+            let updates = updates.clone();
+            let handle = std::thread::Builder::new()
+                .name(format!("filiz-{:?}", worker.source).to_lowercase())
+                .spawn(move || run_worker(worker, updates, control_rx))
+                .expect("spawn collector thread");
+            runtime.controls.push(control_tx);
+            runtime.handles.push(handle);
+        }
+        runtime
+    }
+
+    pub fn refresh(&self) {
+        for control in &self.controls {
+            let _ = control.send(Control::Refresh);
+        }
+    }
+
+    /// Register a thread spawned outside `with_workers` (see traffic worker).
+    pub fn adopt(&mut self, control: Sender<Control>, handle: JoinHandle<()>) {
+        self.controls.push(control);
+        self.handles.push(handle);
+    }
+
+    /// Register a callback that kills a child process on shutdown.
+    pub fn add_child_killer(&mut self, killer: Box<dyn FnOnce() + Send>) {
+        self.child_killers.push(killer);
+    }
+}
+
+fn run_worker(
+    mut worker: WorkerSpec,
+    updates: Sender<CollectorUpdate>,
+    control: mpsc::Receiver<Control>,
+) {
+    let mut guard = StopGuard {
+        source: worker.source,
+        updates: updates.clone(),
+        armed: true,
+    };
+    loop {
+        if updates.send((worker.job)()).is_err() {
+            break;
+        }
+        match control.recv_timeout(worker.interval) {
+            Ok(Control::Refresh) | Err(RecvTimeoutError::Timeout) => continue,
+            Ok(Control::Stop) | Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    guard.armed = false;
+}
+
+impl Drop for CollectorRuntime {
+    fn drop(&mut self) {
+        for control in &self.controls {
+            let _ = control.send(Control::Stop);
+        }
+        for killer in self.child_killers.drain(..) {
+            killer();
+        }
+        for handle in self.handles.drain(..) {
+            let _ = handle.join();
+        }
+    }
+}

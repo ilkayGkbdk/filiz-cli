@@ -35,6 +35,8 @@ impl Drop for TerminalGuard {
 
 fn main() -> anyhow::Result<()> {
     let _guard = TerminalGuard::enter()?;
+    let (updates_tx, updates_rx) = std::sync::mpsc::channel();
+    let runtime = filiz::collectors::runtime::CollectorRuntime::start(updates_tx);
     print!(
         "{}\n  for betül, with love ♡\n",
         include_str!("../assets/logo.ansi")
@@ -44,5 +46,5 @@ fn main() -> anyhow::Result<()> {
     execute!(stdout(), Clear(ClearType::All), MoveTo(0, 0))?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
     let mut app = app::App::new(Duration::from_secs(2));
-    app::run(&mut terminal, &mut app)
+    app::run(&mut terminal, &mut app, runtime, updates_rx)
 }
