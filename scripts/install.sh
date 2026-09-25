@@ -25,6 +25,9 @@ trap 'exit 130' INT TERM
 terminal_size() {
   COLUMNS="$(tput cols 2>/dev/null || printf '100')"
   LINES="$(tput lines 2>/dev/null || printf '30')"
+  BOX_WIDTH=$((COLUMNS - 4))
+  (( BOX_WIDTH < 76 )) && BOX_WIDTH=76
+  (( BOX_WIDTH > COLUMNS - 2 )) && BOX_WIDTH=$((COLUMNS - 2))
   LEFT=$(( (COLUMNS - BOX_WIDTH) / 2 ))
   (( LEFT < 0 )) && LEFT=0
   TOP=$(( (LINES - 24) / 2 ))
@@ -57,14 +60,16 @@ load_logo() {
 
 logo_block() {
   local line_content
+  local logo_left=$((LEFT + (BOX_WIDTH - 2 - 36) / 2))
+  (( logo_left < LEFT + 2 )) && logo_left=$((LEFT + 2))
   if [[ -s "$LOGO_FILE" ]]; then
     while IFS= read -r line_content; do
-      indent
+      printf '%*s' "$logo_left" ''
       printf '%s│%s  %s\n' "$OLIVE" "$RESET" "$line_content"
     done <"$LOGO_FILE"
   else
     while IFS= read -r line_content; do
-      indent
+      printf '%*s' "$logo_left" ''
       printf '%s│%s  %b\n' "$OLIVE" "$RESET" "$line_content"
     done < <(fallback_logo)
   fi
@@ -75,8 +80,9 @@ render() {
   local message="$2"
   local state="$3"
   local marker="${4:-}"
+  local hint="${5:-}"
   terminal_size
-  printf '%s%s%s' "${ESC}[?1049h${ESC}[?25l${ESC}[2J${ESC}[H" "$BG" "$WHITE"
+  printf '%s' "${ESC}[?1049h${ESC}[?25l${BG}${ESC}[2J${ESC}[H${WHITE}"
   printf '\n%.0s' $(seq 1 "$TOP")
   indent; printf '%s╭%*s╮%s\n' "$OLIVE" $((BOX_WIDTH - 2)) '' "$RESET"
   logo_block
@@ -92,6 +98,7 @@ render() {
   box_text ""
   box_text "${GREEN}${marker}${RESET}  ${message}"
   box_text ""
+  [[ -n "$hint" ]] && box_text "${MUTED}${hint}${RESET}"
   indent; printf '%s╰%*s╯%s\n' "$OLIVE" $((BOX_WIDTH - 2)) '' "$RESET"
   printf '%s' "$RESET"
 }
@@ -152,5 +159,7 @@ else
 fi
 sleep 1
 
-render 4 "Filiz hazır — çalıştırmak için: filiz" "COMPLETE" "✓"
-sleep 1.2
+render 4 "Filiz hazır — çalıştırmak için: filiz" "COMPLETE" "✓" "Çıkmak için Enter'a basın."
+if [[ -t 1 && -e /dev/tty ]]; then
+  IFS= read -r < /dev/tty || true
+fi
