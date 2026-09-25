@@ -49,6 +49,41 @@ impl Workspace {
         let next = (current as i8 + direction).rem_euclid(Self::ALL.len() as i8) as usize;
         Self::ALL[next]
     }
+
+    pub fn panels(self) -> &'static [PanelId] {
+        match self {
+            Self::Overview => &[PanelId::Resources, PanelId::Processes, PanelId::Details],
+            Self::Processes => &[PanelId::Processes, PanelId::Details],
+            Self::Network => &[PanelId::Interfaces, PanelId::Traffic],
+            Self::Disks => &[PanelId::Disks],
+            Self::More => &[PanelId::Settings],
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PanelId {
+    Resources,
+    Processes,
+    Details,
+    Interfaces,
+    Traffic,
+    Disks,
+    Settings,
+}
+
+impl PanelId {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Resources => "Resources",
+            Self::Processes => "Processes",
+            Self::Details => "Details",
+            Self::Interfaces => "Interfaces",
+            Self::Traffic => "Traffic",
+            Self::Disks => "Disks",
+            Self::Settings => "Settings",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
