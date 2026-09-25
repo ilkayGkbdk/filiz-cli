@@ -348,6 +348,10 @@ pub fn resolve(stack: &[Context], event: &KeyEvent) -> Option<Action> {
     if control && event.code == KeyCode::Char('c') {
         return Some(Action::Quit);
     }
+    let alt = event.modifiers.contains(KeyModifiers::ALT);
+    if control || alt {
+        return None;
+    }
     let key = KeySpec::from_event(event);
     for &context in stack {
         if context == Context::Filter {

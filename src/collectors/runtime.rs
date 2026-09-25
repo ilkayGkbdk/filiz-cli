@@ -1,4 +1,4 @@
-use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, RecvTimeoutError, Sender, TryRecvError};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -120,9 +120,29 @@ fn run_worker(
         if updates.send((worker.job)()).is_err() {
             break;
         }
-        match control.recv_timeout(worker.interval) {
-            Ok(Control::Refresh) | Err(RecvTimeoutError::Timeout) => continue,
-            Ok(Control::Stop) | Err(RecvTimeoutError::Disconnected) => break,
+        let first = control.recv_timeout(worker.interval);
+        if matches!(first, Err(RecvTimeoutError::Timeout)) {
+            continue;
+        }
+        let mut stop = matches!(
+            first,
+            Ok(Control::Stop) | Err(RecvTimeoutError::Disconnected)
+        );
+        // Drain any additional queued control messages so a backlog of
+        // `Refresh` requests (e.g. from key repeat) doesn't delay a `Stop`
+        // or force multiple redundant jobs to run before shutdown.
+        loop {
+            match control.try_recv() {
+                Ok(Control::Stop) | Err(TryRecvError::Disconnected) => {
+                    stop = true;
+                    break;
+                }
+                Ok(Control::Refresh) => {}
+                Err(TryRecvError::Empty) => break,
+            }
+        }
+        if stop {
+            break;
         }
     }
     guard.armed = false;

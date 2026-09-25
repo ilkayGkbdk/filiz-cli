@@ -117,6 +117,32 @@ fn filter_accepts_uppercase_and_turkish_characters() {
 }
 
 #[test]
+fn modified_letters_are_not_shortcuts() {
+    let stack = vec![Context::Panel(PanelId::Processes), Context::Global];
+    assert_eq!(
+        resolve(
+            &stack,
+            &KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL)
+        ),
+        None
+    );
+    assert_eq!(
+        resolve(
+            &stack,
+            &KeyEvent::new(KeyCode::Char('r'), KeyModifiers::ALT)
+        ),
+        None
+    );
+    assert_eq!(
+        resolve(
+            &stack,
+            &KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)
+        ),
+        Some(Action::Quit)
+    );
+}
+
+#[test]
 fn key_release_events_are_ignored() {
     let mut event = press(KeyCode::Char('q'));
     event.kind = KeyEventKind::Release;

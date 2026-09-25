@@ -112,6 +112,26 @@ fn runtime_drop_joins_workers() {
 }
 
 #[test]
+fn queued_refreshes_do_not_delay_shutdown() {
+    let (tx, rx) = mpsc::channel();
+    let runtime = CollectorRuntime::with_workers(
+        vec![counting_worker(
+            Duration::from_secs(60),
+            Duration::from_millis(100),
+            Arc::new(AtomicUsize::new(0)),
+        )],
+        tx,
+    );
+    rx.recv_timeout(Duration::from_millis(500)).unwrap();
+    for _ in 0..50 {
+        runtime.refresh();
+    }
+    let started = Instant::now();
+    drop(runtime);
+    assert!(started.elapsed() < Duration::from_millis(500));
+}
+
+#[test]
 fn panicking_worker_reports_stopped_source() {
     let (tx, rx) = mpsc::channel();
     let _runtime = CollectorRuntime::with_workers(
