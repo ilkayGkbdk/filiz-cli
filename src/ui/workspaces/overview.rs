@@ -7,6 +7,7 @@ use crate::history::SeriesKey;
 use crate::state::{DiskStats, InterfaceStats, SystemState};
 use crate::ui::components::card::resource_card;
 use crate::ui::format::{bytes, percent, rate};
+use crate::ui::hit::HitTarget;
 use crate::ui::state::{LayoutDensity, PanelId};
 use crate::ui::RenderCx;
 
@@ -60,6 +61,7 @@ pub(crate) fn resources(frame: &mut Frame, area: Rect, cx: &mut RenderCx) {
     if area.height == 0 || area.width == 0 {
         return;
     }
+    cx.out.hits.push(area, HitTarget::Panel(PanelId::Resources));
     let app = cx.app;
     let palette = cx.palette;
     let cpu = app.state.cpu.usage;
@@ -135,6 +137,7 @@ pub(crate) fn details(frame: &mut Frame, area: Rect, cx: &mut RenderCx) {
     if area.height == 0 || area.width == 0 {
         return;
     }
+    cx.out.hits.push(area, HitTarget::Panel(PanelId::Details));
     let app = cx.app;
     let palette = cx.palette;
     let selected = app.selected_process();

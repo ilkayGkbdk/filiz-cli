@@ -3,7 +3,7 @@ use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyEvent, MouseEvent, MouseEventKind};
+use crossterm::event::{self, Event, KeyEvent, MouseEvent};
 use ratatui::{backend::CrosstermBackend, Terminal};
 
 use crate::actions::ProcessAction;
@@ -17,6 +17,7 @@ use crate::model::{
     ProcessInfo, SortMode,
 };
 use crate::state::{CollectorUpdate, InterfaceStats, SystemState};
+use crate::ui::hit::{mouse_action, ClickMemory};
 use crate::ui::state::{PanelId, PanelToggle, UiState, Workspace};
 use crate::ui::{self, RenderOutput};
 
@@ -33,6 +34,7 @@ pub struct App {
     pub last_render: RenderOutput,
     selected_identity: Option<ProcessIdentity>,
     notice_until: Option<Instant>,
+    clicks: ClickMemory,
 }
 
 impl App {
@@ -50,6 +52,7 @@ impl App {
             last_render: RenderOutput::default(),
             selected_identity: None,
             notice_until: None,
+            clicks: ClickMemory::default(),
         }
     }
 
@@ -152,15 +155,19 @@ impl App {
     }
 
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> Vec<Effect> {
-        if self.mode != AppMode::Dashboard {
+        if self.mode == AppMode::Filtering {
             return Vec::new();
         }
-        let delta = match mouse.kind {
-            MouseEventKind::ScrollUp => -3,
-            MouseEventKind::ScrollDown => 3,
-            _ => return Vec::new(),
-        };
-        self.update(Action::Scroll(self.ui.focus, delta))
+        match mouse_action(
+            &self.last_render.hits,
+            &mouse,
+            self.ui.focus,
+            &mut self.clicks,
+            Instant::now(),
+        ) {
+            Some(action) => self.update(action),
+            None => Vec::new(),
+        }
     }
 
     pub fn update(&mut self, action: Action) -> Vec<Effect> {

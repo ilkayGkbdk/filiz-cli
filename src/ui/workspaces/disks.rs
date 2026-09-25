@@ -6,7 +6,7 @@ use ratatui::{
 };
 
 use crate::state::DiskStats;
-use crate::ui::components::table::{border_for, highlight, table_state};
+use crate::ui::components::table::{border_for, highlight, register_rows, table_state};
 use crate::ui::format::{bytes, percent};
 use crate::ui::state::PanelId;
 use crate::ui::RenderCx;
@@ -64,11 +64,9 @@ fn disks(frame: &mut Frame, area: Rect, cx: &mut RenderCx) {
     .style(Style::default().fg(palette.text))
     .row_highlight_style(highlight(&palette))
     .highlight_symbol("▸ ");
-    frame.render_stateful_widget(
-        table,
-        area,
-        &mut table_state(app, PanelId::Disks, disks.len()),
-    );
+    let len = disks.len();
+    frame.render_stateful_widget(table, area, &mut table_state(app, PanelId::Disks, len));
+    register_rows(cx, PanelId::Disks, area, len);
 }
 
 fn disk_row(disk: &DiskStats) -> Row<'static> {

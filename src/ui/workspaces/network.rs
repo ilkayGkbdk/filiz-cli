@@ -9,7 +9,7 @@ use crate::history::SeriesKey;
 use crate::model::ProcessInfo;
 use crate::state::InterfaceStats;
 use crate::ui::components::card::network_card;
-use crate::ui::components::table::{border_for, highlight, table_state};
+use crate::ui::components::table::{border_for, highlight, register_rows, table_state};
 use crate::ui::format::{bytes, rate};
 use crate::ui::state::{LayoutDensity, PanelId};
 use crate::ui::RenderCx;
@@ -139,6 +139,8 @@ fn interface_table(frame: &mut Frame, area: Rect, cx: &mut RenderCx) {
     cx.out
         .viewports
         .insert(PanelId::Interfaces, area.height.saturating_sub(3) as usize);
+    let interface_count = cx.app.state.interfaces.len();
+    register_rows(cx, PanelId::Interfaces, area, interface_count);
 }
 
 fn traffic_table(frame: &mut Frame, area: Rect, cx: &mut RenderCx) {
@@ -150,6 +152,7 @@ fn traffic_table(frame: &mut Frame, area: Rect, cx: &mut RenderCx) {
     } else {
         "No process traffic yet"
     };
+    let count = talkers.len();
     let rows: Vec<Row> = talkers.iter().map(|p| traffic_row(p)).collect();
     let traffic_table = Table::new(
         if rows.is_empty() {
@@ -190,6 +193,7 @@ fn traffic_table(frame: &mut Frame, area: Rect, cx: &mut RenderCx) {
     cx.out
         .viewports
         .insert(PanelId::Traffic, area.height.saturating_sub(3) as usize);
+    register_rows(cx, PanelId::Traffic, area, count);
 }
 
 fn rate_or_na(value: Option<f64>) -> String {

@@ -1,5 +1,6 @@
 pub mod components;
 pub mod format;
+pub mod hit;
 pub mod state;
 pub mod theme;
 pub mod workspaces;
@@ -22,6 +23,7 @@ use theme::Palette;
 #[derive(Clone, Debug, Default)]
 pub struct RenderOutput {
     pub viewports: HashMap<PanelId, usize>,
+    pub hits: hit::HitMap,
 }
 
 pub struct RenderCx<'a> {

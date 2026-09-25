@@ -6,7 +6,7 @@ use ratatui::{
 };
 
 use crate::model::{ProcessInfo, SortMode};
-use crate::ui::components::table::{border_for, highlight, table_state};
+use crate::ui::components::table::{border_for, highlight, register_rows, table_state};
 use crate::ui::format::bytes;
 use crate::ui::state::{LayoutDensity, PanelId};
 use crate::ui::theme;
@@ -119,7 +119,9 @@ pub(crate) fn process_table(frame: &mut Frame, area: Rect, cx: &mut RenderCx) {
         .highlight_symbol("▸ ")
         .column_spacing(1);
     let mut state = table_state(app, PanelId::Processes, processes.len());
+    let len = processes.len();
     frame.render_stateful_widget(table, area, &mut state);
+    register_rows(cx, PanelId::Processes, area, len);
 }
 
 pub(crate) fn process_row(

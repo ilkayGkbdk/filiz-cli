@@ -6,8 +6,10 @@ use ratatui::{
     Frame,
 };
 
+use crate::input::action::Action;
 use crate::model::ActionKind;
 use crate::ui::format::bytes;
+use crate::ui::hit::HitTarget;
 use crate::ui::RenderCx;
 
 pub fn detail(frame: &mut Frame, area: Rect, cx: &mut RenderCx) {
@@ -18,6 +20,7 @@ pub fn detail(frame: &mut Frame, area: Rect, cx: &mut RenderCx) {
     if popup.width < 4 || popup.height < 4 {
         return;
     }
+    cx.out.hits.push(area, HitTarget::Blocker);
     let palette = cx.palette;
     frame.render_widget(Clear, popup);
     let lines = vec![
@@ -75,6 +78,7 @@ pub fn confirmation(frame: &mut Frame, area: Rect, cx: &mut RenderCx) {
     if popup.width < 4 || popup.height < 4 {
         return;
     }
+    cx.out.hits.push(area, HitTarget::Blocker);
     let palette = cx.palette;
     let name = app
         .state
@@ -100,7 +104,7 @@ pub fn confirmation(frame: &mut Frame, area: Rect, cx: &mut RenderCx) {
         Line::from(format!("{name}  /  PID {}", pending.identity().pid)),
         Line::from(""),
         Line::from(Span::styled(
-            "Y  CONFIRM       N / ESC  CANCEL",
+            "Y  CONFIRM              N / ESC  CANCEL",
             Style::default().fg(palette.warn),
         )),
     ];
@@ -119,6 +123,28 @@ pub fn confirmation(frame: &mut Frame, area: Rect, cx: &mut RenderCx) {
             .block(block)
             .alignment(Alignment::Center),
         popup,
+    );
+    let line = Rect {
+        x: popup.x + 1,
+        y: popup.y + 6,
+        width: popup.width.saturating_sub(2),
+        height: 1,
+    };
+    let half = line.width / 2;
+    cx.out.hits.push(
+        Rect {
+            width: half,
+            ..line
+        },
+        HitTarget::Button(Action::Confirm),
+    );
+    cx.out.hits.push(
+        Rect {
+            x: line.x + half,
+            width: line.width - half,
+            ..line
+        },
+        HitTarget::Button(Action::Cancel),
     );
 }
 

@@ -6,6 +6,8 @@ use ratatui::{
     Frame,
 };
 
+use crate::ui::hit::HitTarget;
+use crate::ui::state::PanelId;
 use crate::ui::RenderCx;
 
 use super::WorkspaceView;
@@ -22,6 +24,7 @@ fn more(frame: &mut Frame, area: Rect, cx: &mut RenderCx) {
     if area.height == 0 || area.width == 0 {
         return;
     }
+    cx.out.hits.push(area, HitTarget::Panel(PanelId::Settings));
     let app = cx.app;
     let palette = cx.palette;
     let temperature = app

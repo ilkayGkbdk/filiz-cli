@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 use crate::ui::format::uptime as format_uptime;
+use crate::ui::hit::HitTarget;
 use crate::ui::state::Workspace;
 use crate::ui::RenderCx;
 
@@ -71,21 +72,31 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &mut RenderCx) {
         ]),
     ];
     if area.height >= 3 {
-        let tabs = Workspace::ALL
-            .iter()
-            .enumerate()
-            .map(|(index, workspace)| {
-                let style = if *workspace == app.ui.workspace {
-                    Style::default()
-                        .fg(palette.bg)
-                        .bg(palette.accent)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(palette.text_muted)
-                };
-                Span::styled(format!("  {} {}  ", index + 1, workspace.label()), style)
-            })
-            .collect::<Vec<_>>();
+        let mut x = area.x;
+        let mut tabs = Vec::new();
+        for (index, workspace) in Workspace::ALL.iter().enumerate() {
+            let text = format!("  {} {}  ", index + 1, workspace.label());
+            let width = text.chars().count() as u16;
+            cx.out.hits.push(
+                Rect {
+                    x,
+                    y: area.y + 2,
+                    width: width.min(area.right().saturating_sub(x)),
+                    height: 1,
+                },
+                HitTarget::Tab(*workspace),
+            );
+            x = x.saturating_add(width);
+            let style = if *workspace == app.ui.workspace {
+                Style::default()
+                    .fg(palette.bg)
+                    .bg(palette.accent)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(palette.text_muted)
+            };
+            tabs.push(Span::styled(text, style));
+        }
         lines.push(Line::from(tabs));
     }
     frame.render_widget(

@@ -9,6 +9,7 @@ use ratatui::{
 use crate::input::action::Action;
 use crate::input::keymap;
 use crate::model::AppMode;
+use crate::ui::hit::HitTarget;
 use crate::ui::RenderCx;
 
 pub fn render(frame: &mut Frame, area: Rect, cx: &mut RenderCx) {
@@ -38,6 +39,24 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &mut RenderCx) {
             }
             lines.push(Vec::new());
             width = 0;
+        }
+        let x = area.x + width as u16;
+        let y = area.y + (lines.len() - 1) as u16;
+        // Modals (`ConfirmingAction`, `ProcessDetail`) draw a full-screen `Blocker`
+        // after the footer and take over the same key bindings shown here (e.g.
+        // Y/CONFIRM, N/CANCEL), so a footer hint would never be reachable by mouse
+        // in those modes; skip registering it there to avoid a duplicate,
+        // unreachable `HitTarget::Button` shadowing the modal's own button.
+        if app.mode == AppMode::Dashboard {
+            cx.out.hits.push(
+                Rect {
+                    x,
+                    y,
+                    width: needed as u16,
+                    height: 1,
+                },
+                HitTarget::Button(binding.action),
+            );
         }
         width += needed;
         let key_color = if matches!(binding.action, Action::Terminate | Action::Kill) {
