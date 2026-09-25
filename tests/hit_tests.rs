@@ -183,6 +183,19 @@ fn confirmation_modal_blocks_background_and_exposes_buttons() {
 }
 
 #[test]
+fn row_hits_follow_the_rendered_offset_after_switching_workspace() {
+    // ratatui's TableState re-scrolls its offset during render to keep the
+    // selection visible; `register_rows` must key off that rendered offset,
+    // not the stale `ListState.offset` from before the workspace switch.
+    let mut app = app();
+    draw(&mut app);
+    app.update(Action::Select(PanelId::Processes, 25));
+    app.ui.set_workspace(Workspace::Overview);
+    draw(&mut app);
+    find(&app, HitTarget::Row(PanelId::Processes, 25));
+}
+
+#[test]
 fn footer_hints_are_buttons() {
     let mut app = app();
     draw(&mut app);

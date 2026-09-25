@@ -34,10 +34,15 @@ pub fn highlight(palette: &Palette) -> Style {
 }
 
 /// Register a bordered table panel and its visible rows (1 border + 1 header line above rows).
-pub fn register_rows(cx: &mut RenderCx, panel: PanelId, area: Rect, len: usize) {
+///
+/// `offset` must come from the `TableState` actually used to render the table
+/// (`state.offset()`), not the stored `ListState` offset: ratatui adjusts the
+/// `TableState`'s offset during `render_stateful_widget` to keep the selection
+/// visible, so the two can disagree until the next `update`.
+pub fn register_rows(cx: &mut RenderCx, panel: PanelId, area: Rect, len: usize, offset: usize) {
     cx.out.hits.push(area, HitTarget::Panel(panel));
     let viewport = area.height.saturating_sub(3) as usize;
-    let offset = cx.app.ui.list(panel).offset.min(len.saturating_sub(1));
+    let offset = offset.min(len.saturating_sub(1));
     for (row, index) in (offset..len).take(viewport).enumerate() {
         cx.out.hits.push(
             Rect {

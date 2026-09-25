@@ -134,11 +134,16 @@ pub fn spawn(
     (control_tx, handle, Box::new(move || kill(&slot)))
 }
 
+/// Drains all pending control messages: a queued `Refresh` must not hide a
+/// `Stop` sitting behind it in the channel.
 fn stop_requested(control: &Receiver<Control>) -> bool {
-    matches!(
-        control.try_recv(),
-        Ok(Control::Stop) | Err(TryRecvError::Disconnected)
-    )
+    loop {
+        match control.try_recv() {
+            Ok(Control::Stop) | Err(TryRecvError::Disconnected) => return true,
+            Ok(Control::Refresh) => continue,
+            Err(TryRecvError::Empty) => return false,
+        }
+    }
 }
 
 fn run(
@@ -165,8 +170,11 @@ fn run(
                     kill(&slot);
                     break;
                 }
-                stream(BufReader::new(stdout), &updates);
+                let delivered = stream(BufReader::new(stdout), &updates);
                 kill(&slot);
+                if delivered {
+                    failures = 0;
+                }
                 "nettop exited".to_owned()
             }
             Err(error) => format!("nettop unavailable: {error}"),
@@ -195,9 +203,13 @@ fn run(
     guard.disarm();
 }
 
-fn stream(reader: impl BufRead, updates: &Sender<CollectorUpdate>) {
+/// Streams nettop output until it exits or the channel closes.
+/// Returns `true` if at least one block was delivered, so the caller can
+/// reset the restart-failure counter on a genuinely working run.
+fn stream(reader: impl BufRead, updates: &Sender<CollectorUpdate>) -> bool {
     let mut parser = NettopParser::default();
     let mut tracker = TrafficTracker::default();
+    let mut delivered = false;
     for line in reader.lines() {
         let Ok(line) = line else {
             break;
@@ -207,6 +219,8 @@ fn stream(reader: impl BufRead, updates: &Sender<CollectorUpdate>) {
             if updates.send(CollectorUpdate::Traffic(traffic)).is_err() {
                 break;
             }
+            delivered = true;
         }
     }
+    delivered
 }

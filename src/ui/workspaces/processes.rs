@@ -121,7 +121,7 @@ pub(crate) fn process_table(frame: &mut Frame, area: Rect, cx: &mut RenderCx) {
     let mut state = table_state(app, PanelId::Processes, processes.len());
     let len = processes.len();
     frame.render_stateful_widget(table, area, &mut state);
-    register_rows(cx, PanelId::Processes, area, len);
+    register_rows(cx, PanelId::Processes, area, len, state.offset());
 }
 
 pub(crate) fn process_row(

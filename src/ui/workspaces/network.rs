@@ -131,16 +131,19 @@ fn interface_table(frame: &mut Frame, area: Rect, cx: &mut RenderCx) {
     .row_highlight_style(highlight(&palette))
     .highlight_symbol("▸ ")
     .column_spacing(1);
-    frame.render_stateful_widget(
-        interfaces_table,
-        area,
-        &mut table_state(app, PanelId::Interfaces, app.state.interfaces.len()),
-    );
+    let mut state = table_state(app, PanelId::Interfaces, app.state.interfaces.len());
+    frame.render_stateful_widget(interfaces_table, area, &mut state);
     cx.out
         .viewports
         .insert(PanelId::Interfaces, area.height.saturating_sub(3) as usize);
     let interface_count = cx.app.state.interfaces.len();
-    register_rows(cx, PanelId::Interfaces, area, interface_count);
+    register_rows(
+        cx,
+        PanelId::Interfaces,
+        area,
+        interface_count,
+        state.offset(),
+    );
 }
 
 fn traffic_table(frame: &mut Frame, area: Rect, cx: &mut RenderCx) {
@@ -185,15 +188,12 @@ fn traffic_table(frame: &mut Frame, area: Rect, cx: &mut RenderCx) {
     .style(Style::default().fg(palette.text))
     .row_highlight_style(highlight(&palette))
     .highlight_symbol("▸ ");
-    frame.render_stateful_widget(
-        traffic_table,
-        area,
-        &mut table_state(app, PanelId::Traffic, talkers.len()),
-    );
+    let mut state = table_state(app, PanelId::Traffic, talkers.len());
+    frame.render_stateful_widget(traffic_table, area, &mut state);
     cx.out
         .viewports
         .insert(PanelId::Traffic, area.height.saturating_sub(3) as usize);
-    register_rows(cx, PanelId::Traffic, area, count);
+    register_rows(cx, PanelId::Traffic, area, count, state.offset());
 }
 
 fn rate_or_na(value: Option<f64>) -> String {

@@ -352,6 +352,10 @@ pub fn run(
     runtime: CollectorRuntime,
     updates: Receiver<CollectorUpdate>,
 ) -> Result<()> {
+    // `updates` must be dropped before `runtime`: dropping `runtime` joins the
+    // collector threads, and they can block sending on `updates` until its
+    // receiver is gone. Params drop in reverse declaration order (`updates`
+    // then `runtime`) on every return path here, so this ordering holds as-is.
     const INPUT_WAIT: Duration = Duration::from_millis(50);
     let mut dirty = true;
     loop {

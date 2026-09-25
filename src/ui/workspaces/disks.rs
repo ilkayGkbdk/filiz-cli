@@ -65,8 +65,9 @@ fn disks(frame: &mut Frame, area: Rect, cx: &mut RenderCx) {
     .row_highlight_style(highlight(&palette))
     .highlight_symbol("▸ ");
     let len = disks.len();
-    frame.render_stateful_widget(table, area, &mut table_state(app, PanelId::Disks, len));
-    register_rows(cx, PanelId::Disks, area, len);
+    let mut state = table_state(app, PanelId::Disks, len);
+    frame.render_stateful_widget(table, area, &mut state);
+    register_rows(cx, PanelId::Disks, area, len, state.offset());
 }
 
 fn disk_row(disk: &DiskStats) -> Row<'static> {
