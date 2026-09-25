@@ -1,13 +1,3 @@
-use std::time::SystemTime;
-
-/// A single measured resource value. `None` represents an unavailable metric.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ResourceMetric {
-    pub name: String,
-    pub value: Option<f64>,
-    pub unit: String,
-}
-
 /// Stable process identity for distinguishing PID reuse across process lifetimes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ProcessIdentity {
@@ -85,18 +75,6 @@ impl CancelledAction {
     }
 }
 
-/// Platform measurements that may not be exposed on every Mac.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct MacOsMetrics {
-    pub cpu_user_percent: Option<f64>,
-    pub cpu_system_percent: Option<f64>,
-    pub battery_percent: Option<f64>,
-    pub battery_power_source: Option<String>,
-    pub battery_charging: Option<bool>,
-    pub temperature_celsius: Option<f64>,
-    pub warnings: Vec<CollectorWarning>,
-}
-
 /// Per-process network throughput in bytes per second.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TrafficRate {
@@ -115,67 +93,6 @@ pub struct ProcessInfo {
     pub user: Option<String>,
     pub status: Option<String>,
     pub traffic: Option<TrafficRate>,
-}
-
-/// An event suitable for display in the recent-events panel.
-#[derive(Clone, Debug, PartialEq)]
-pub struct SystemEvent {
-    pub timestamp: SystemTime,
-    pub message: String,
-}
-
-/// A non-fatal issue reported by an individual collector.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CollectorWarning {
-    pub collector: String,
-    pub message: String,
-}
-
-/// Data returned by a successful collector. Missing measurements stay local to the collector.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct CollectorData {
-    pub metrics: Vec<ResourceMetric>,
-    pub processes: Vec<ProcessInfo>,
-    pub network_summaries: Vec<NetworkSummary>,
-    pub warnings: Vec<CollectorWarning>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ConnectionSummary {
-    pub process: String,
-    pub remote: String,
-    pub direction: String,
-    pub bytes_per_second: Option<f64>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct NetworkSummary {
-    pub interface: String,
-    pub download_rate: Option<f64>,
-    pub upload_rate: Option<f64>,
-    pub download_total: u64,
-    pub upload_total: u64,
-    pub peak_download: f64,
-    pub peak_upload: f64,
-    pub connections: Vec<ConnectionSummary>,
-}
-
-/// A collector failure is localized by snapshot assembly as a warning.
-pub type CollectorResult = Result<CollectorData, CollectorWarning>;
-
-/// The data gathered during one system refresh.
-#[derive(Clone, Debug, PartialEq)]
-pub struct SystemSnapshot {
-    pub captured_at: SystemTime,
-    pub metrics: Vec<ResourceMetric>,
-    pub processes: Vec<ProcessInfo>,
-    pub network_summaries: Vec<NetworkSummary>,
-    pub events: Vec<SystemEvent>,
-    pub warnings: Vec<CollectorWarning>,
-}
-
-pub fn network_summary(snapshot: &SystemSnapshot) -> Option<&NetworkSummary> {
-    snapshot.network_summaries.first()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

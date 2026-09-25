@@ -1,8 +1,9 @@
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::history::SeriesKey;
+    use crate::state::SystemSample;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use std::time::SystemTime;
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
@@ -26,14 +27,10 @@ mod tests {
 
     fn app_with_processes() -> App {
         let mut app = App::new(Duration::from_secs(2));
-        app.replace_snapshot(SystemSnapshot {
-            captured_at: SystemTime::now(),
-            metrics: Vec::new(),
+        app.apply_update(CollectorUpdate::System(SystemSample {
             processes: vec![process(20, 10.0), process(10, 20.0)],
-            network_summaries: Vec::new(),
-            events: Vec::new(),
-            warnings: Vec::new(),
-        });
+            ..Default::default()
+        }));
         app
     }
 
@@ -119,39 +116,52 @@ mod tests {
     }
 
     #[test]
-    fn replacing_snapshot_keeps_selection_by_full_identity() {
+    fn replacing_state_keeps_selection_by_full_identity() {
         let mut app = app_with_processes();
         app.handle_key(key(KeyCode::Down));
-        let mut replacement = app.snapshot.as_ref().unwrap().clone();
-        replacement.processes = vec![process(20, 80.0), process(10, 1.0)];
-        app.replace_snapshot(replacement);
+        app.apply_update(CollectorUpdate::System(SystemSample {
+            processes: vec![process(20, 80.0), process(10, 1.0)],
+            ..Default::default()
+        }));
         assert_eq!(app.selected_process().unwrap().identity.pid, 20);
-        let mut reused = app.snapshot.as_ref().unwrap().clone();
-        reused.processes[0].identity.start_time += 1;
-        app.replace_snapshot(reused);
+        let mut reused = process(20, 80.0);
+        reused.identity.start_time += 1;
+        app.apply_update(CollectorUpdate::System(SystemSample {
+            processes: vec![reused, process(10, 1.0)],
+            ..Default::default()
+        }));
         assert_eq!(app.selected_process().unwrap().identity.pid, 10);
     }
 
     #[test]
-    fn network_history_keeps_rate_changes_above_100_kilobytes() {
+    fn network_history_is_recorded_per_interface() {
         let mut app = app_with_processes();
-        let mut snapshot = app.snapshot.as_ref().unwrap().clone();
-        snapshot.metrics.push(crate::model::ResourceMetric {
-            name: "network.en0.received".into(),
-            value: Some(200_000.0),
-            unit: "B/s".into(),
-        });
-        app.replace_snapshot(snapshot);
-        assert_eq!(app.histories[3].last(), Some(&200_000));
+        app.apply_update(CollectorUpdate::System(SystemSample {
+            interfaces: vec![crate::state::InterfaceStats {
+                name: "en0".into(),
+                rx_rate: Some(200_000.0),
+                tx_rate: Some(1_000.0),
+                rx_total: 0,
+                tx_total: 0,
+                peak_rx: 0.0,
+                peak_tx: 0.0,
+            }],
+            ..Default::default()
+        }));
+        assert_eq!(
+            app.history.series(&SeriesKey::NetRx("en0".into())).last(),
+            Some(&200_000)
+        );
     }
 
     #[test]
     fn self_process_does_not_enter_action_confirmation() {
         let mut app = app_with_processes();
         let self_pid = std::process::id();
-        let mut snapshot = app.snapshot.as_ref().unwrap().clone();
-        snapshot.processes = vec![process(self_pid, 1.0)];
-        app.replace_snapshot(snapshot);
+        app.apply_update(CollectorUpdate::System(SystemSample {
+            processes: vec![process(self_pid, 1.0)],
+            ..Default::default()
+        }));
 
         assert_eq!(app.handle_key(key(KeyCode::Char('k'))), AppCommand::Noop);
         assert_eq!(app.mode, AppMode::Dashboard);
@@ -168,10 +178,12 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 
 use crate::actions::ProcessAction;
 use crate::collectors::CollectorSet;
+use crate::history::History;
 use crate::model::{
     filter_processes, sort_processes, ActionKind, AppMode, ConfirmedAction, PendingAction,
-    ProcessIdentity, ProcessInfo, SortMode, SystemSnapshot,
+    ProcessIdentity, ProcessInfo, SortMode,
 };
+use crate::state::{CollectorUpdate, SystemState};
 use crate::ui;
 use crate::ui::state::{UiCommand, UiState};
 
@@ -211,7 +223,7 @@ pub enum AppCommand {
 
 pub struct App {
     pub refresh: Duration,
-    pub snapshot: Option<SystemSnapshot>,
+    pub state: SystemState,
     pub mode: AppMode,
     pub focus: Panel,
     pub sort: SortMode,
@@ -219,7 +231,7 @@ pub struct App {
     pub selected_index: usize,
     pub pending_action: Option<PendingAction>,
     pub notice: Option<String>,
-    pub histories: [Vec<u64>; 4],
+    pub history: History,
     pub ui: UiState,
     selected_identity: Option<ProcessIdentity>,
     notice_until: Option<Instant>,
@@ -229,7 +241,7 @@ impl App {
     pub fn new(refresh: Duration) -> Self {
         Self {
             refresh,
-            snapshot: None,
+            state: SystemState::default(),
             mode: AppMode::Dashboard,
             focus: Panel::Processes,
             sort: SortMode::Cpu,
@@ -237,41 +249,24 @@ impl App {
             selected_index: 0,
             pending_action: None,
             notice: None,
-            histories: std::array::from_fn(|_| Vec::new()),
+            history: History::new(60),
             ui: UiState::default(),
             selected_identity: None,
             notice_until: None,
         }
     }
 
-    pub fn replace_snapshot(&mut self, snapshot: SystemSnapshot) {
-        for (index, value) in [
-            metric_value(&snapshot, "cpu.usage"),
-            metric_value(&snapshot, "memory.usage"),
-            disk_usage(&snapshot),
-            network_rate(&snapshot),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            if let Some(value) = value {
-                let history = &mut self.histories[index];
-                history.push(value.clamp(0.0, u64::MAX as f64) as u64);
-                if history.len() > 48 {
-                    history.remove(0);
-                }
-            }
+    pub fn apply_update(&mut self, update: CollectorUpdate) {
+        let is_system = matches!(update, CollectorUpdate::System(_));
+        self.state.apply(update);
+        if is_system {
+            self.history.record(&self.state);
         }
-        self.snapshot = Some(snapshot);
         self.reconcile_selection();
     }
 
     pub fn visible_processes(&self) -> Vec<ProcessInfo> {
-        let mut processes = self
-            .snapshot
-            .as_ref()
-            .map(|snapshot| filter_processes(&snapshot.processes, &self.filter))
-            .unwrap_or_default();
+        let mut processes = filter_processes(&self.state.processes, &self.filter);
         sort_processes(&mut processes, self.sort);
         processes
     }
@@ -535,40 +530,11 @@ fn panel_label(panel: Panel) -> &'static str {
     }
 }
 
-fn metric_value(snapshot: &SystemSnapshot, name: &str) -> Option<f64> {
-    snapshot
-        .metrics
-        .iter()
-        .find(|metric| metric.name == name)?
-        .value
-}
-
-fn disk_usage(snapshot: &SystemSnapshot) -> Option<f64> {
-    metric_value(snapshot, "disk./.usage").or_else(|| {
-        snapshot
-            .metrics
-            .iter()
-            .find(|metric| metric.name.starts_with("disk.") && metric.name.ends_with(".usage"))
-            .and_then(|metric| metric.value)
-    })
-}
-
-fn network_rate(snapshot: &SystemSnapshot) -> Option<f64> {
-    let rates: Vec<_> = snapshot
-        .metrics
-        .iter()
-        .filter(|metric| {
-            metric.name.starts_with("network.")
-                && (metric.name.ends_with(".received") || metric.name.ends_with(".transmitted"))
-        })
-        .filter_map(|metric| metric.value)
-        .collect();
-    (!rates.is_empty()).then(|| rates.iter().sum::<f64>())
-}
-
 pub fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> Result<()> {
     let mut collectors = CollectorSet::new();
-    app.replace_snapshot(collectors.snapshot());
+    for update in collectors.collect_all() {
+        app.apply_update(update);
+    }
     let mut last_refresh = Instant::now();
     let mut dirty = true;
     loop {
@@ -577,7 +543,9 @@ pub fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
             dirty = false;
         }
         if last_refresh.elapsed() >= app.refresh {
-            app.replace_snapshot(collectors.snapshot());
+            for update in collectors.collect_all() {
+                app.apply_update(update);
+            }
             last_refresh = Instant::now();
             dirty = true;
         }
@@ -590,7 +558,9 @@ pub fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
                     match app.handle_key(key) {
                         AppCommand::Quit => break,
                         AppCommand::Refresh => {
-                            app.replace_snapshot(collectors.snapshot());
+                            for update in collectors.collect_all() {
+                                app.apply_update(update);
+                            }
                             last_refresh = Instant::now();
                         }
                         AppCommand::ConfirmAction(action) => {
@@ -599,7 +569,9 @@ pub fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
                                 Ok(()) => app.show_notice(format!("Signal sent to PID {pid}.")),
                                 Err(error) => app.show_notice(error.to_user_message()),
                             }
-                            app.replace_snapshot(collectors.snapshot());
+                            for update in collectors.collect_all() {
+                                app.apply_update(update);
+                            }
                             last_refresh = Instant::now();
                         }
                         _ => {}

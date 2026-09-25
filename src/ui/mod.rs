@@ -106,25 +106,37 @@ fn workspace_area(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{ProcessIdentity, ProcessInfo, ResourceMetric, SystemSnapshot};
+    use crate::model::{ProcessIdentity, ProcessInfo};
+    use crate::state::{CollectorUpdate, DiskStats, InterfaceStats, MemoryStats, SystemSample};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::{backend::TestBackend, Terminal};
-    use std::time::{Duration, SystemTime};
+    use std::time::Duration;
 
     fn sample_app() -> App {
         let mut app = App::new(Duration::from_secs(2));
-        app.replace_snapshot(SystemSnapshot {
-            captured_at: SystemTime::now(),
-            metrics: vec![
-                metric("cpu.usage", 27.0, "%"),
-                metric("memory.usage", 62.0, "%"),
-                metric("memory.used", 16.0 * 1024.0 * 1024.0 * 1024.0, "B"),
-                metric("memory.total", 32.0 * 1024.0 * 1024.0 * 1024.0, "B"),
-                metric("disk./.usage", 74.0, "%"),
-                metric("network.en0.received", 1024.0, "B/s"),
-                metric("network.en0.transmitted", 512.0, "B/s"),
-                metric("uptime", 3600.0, "s"),
-            ],
+        app.apply_update(CollectorUpdate::System(SystemSample {
+            cpu_usage: Some(35.0),
+            memory: MemoryStats {
+                total: Some(32 * 1024 * 1024 * 1024),
+                used: Some(20 * 1024 * 1024 * 1024),
+                ..Default::default()
+            },
+            disks: vec![DiskStats {
+                mount: "/".into(),
+                total: 100,
+                used: 91,
+                free: 9,
+                is_system: false,
+            }],
+            interfaces: vec![InterfaceStats {
+                name: "en0".into(),
+                rx_rate: Some(1024.0),
+                tx_rate: Some(512.0),
+                rx_total: 0,
+                tx_total: 0,
+                peak_rx: 0.0,
+                peak_tx: 0.0,
+            }],
             processes: vec![ProcessInfo {
                 identity: ProcessIdentity {
                     pid: 42,
@@ -138,19 +150,10 @@ mod tests {
                 status: Some("Running".into()),
                 traffic: None,
             }],
-            network_summaries: Vec::new(),
-            events: Vec::new(),
-            warnings: Vec::new(),
-        });
+            uptime: Some(Duration::from_secs(3600)),
+            ..Default::default()
+        }));
         app
-    }
-
-    fn metric(name: &str, value: f64, unit: &str) -> ResourceMetric {
-        ResourceMetric {
-            name: name.into(),
-            value: Some(value),
-            unit: unit.into(),
-        }
     }
 
     fn screen(app: &App, width: u16, height: u16) -> String {

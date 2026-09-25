@@ -7,9 +7,9 @@ use ratatui::{
 };
 
 use crate::app::{App, Panel};
-use crate::model::{
-    ActionKind, AppMode, ConnectionSummary, NetworkSummary, ProcessInfo, SortMode, SystemSnapshot,
-};
+use crate::history::SeriesKey;
+use crate::model::{ActionKind, AppMode, ProcessInfo, SortMode};
+use crate::state::{DiskStats, InterfaceStats, SystemState};
 
 use super::format::{bytes, percent, rate, uptime as format_uptime};
 use super::state::Workspace;
@@ -17,29 +17,29 @@ use super::theme;
 
 pub fn status(frame: &mut Frame, area: Rect, app: &App) {
     let palette = app.ui.theme.palette();
-    let snapshot = app.snapshot.as_ref();
-    let warnings = snapshot.map_or(0, |snapshot| snapshot.warnings.len());
-    let health = if warnings == 0 {
+    let failing = app.state.has_failures();
+    let health = if !failing {
         "SYSTEM NORMAL"
     } else {
         "CHECK METRICS"
     };
-    let health_color = if warnings == 0 {
-        palette.ok
-    } else {
-        palette.warn
-    };
-    let uptime = snapshot
-        .and_then(|snapshot| value(snapshot, "uptime"))
-        .map(|seconds| format_uptime(seconds as u64))
+    let health_color = if !failing { palette.ok } else { palette.warn };
+    let uptime = app
+        .state
+        .uptime
+        .map(|d| format_uptime(d.as_secs()))
         .unwrap_or_else(|| "N/A".into());
-    let battery = snapshot
-        .and_then(|snapshot| value(snapshot, "battery.percent"))
-        .map(|percent| format!("{percent:.0}%"))
+    let battery = app
+        .state
+        .battery
+        .as_ref()
+        .map(|b| format!("{:.0}%", b.percent))
         .unwrap_or_else(|| "N/A".into());
-    let temperature = snapshot
-        .and_then(|snapshot| value(snapshot, "temperature.celsius"))
-        .map(|degrees| format!("{degrees:.0}°C"))
+    let temperature = app
+        .state
+        .cpu
+        .temperature
+        .map(|t| format!("{t:.0}°C"))
         .unwrap_or_else(|| "N/A".into());
     let mut lines = vec![
         Line::from(vec![
@@ -103,32 +103,34 @@ pub fn resources(frame: &mut Frame, area: Rect, app: &App) {
         return;
     }
     let palette = app.ui.theme.palette();
-    let snapshot = app.snapshot.as_ref();
-    let cpu = snapshot.and_then(|s| value(s, "cpu.usage"));
-    let memory = snapshot.and_then(|s| value(s, "memory.usage"));
-    let disk = snapshot.and_then(disk_usage);
-    let (rx, tx) = snapshot.map(network_rates).unwrap_or((None, None));
+    let cpu = app.state.cpu.usage;
+    let memory = app.state.memory.usage_percent();
+    let disk = app.state.primary_disk().and_then(DiskStats::usage_percent);
+    let (rx, tx) = total_rates(&app.state);
+    let network_history = selected_interface(app)
+        .map(|i| app.history.series(&SeriesKey::NetRx(i.name.clone())))
+        .unwrap_or_default();
     let cards = [
         (
             "CPU",
             percent(cpu),
-            cpu_detail(snapshot),
+            cpu_detail(&app.state),
             cpu,
-            &app.histories[0],
+            app.history.series(&SeriesKey::Cpu),
         ),
         (
             "MEMORY",
             percent(memory),
-            memory_detail(snapshot),
+            memory_detail(&app.state),
             memory,
-            &app.histories[1],
+            app.history.series(&SeriesKey::Memory),
         ),
         (
             "DISK",
             percent(disk),
-            disk_detail(snapshot),
+            disk_detail(&app.state),
             disk,
-            &app.histories[2],
+            app.history.series(&SeriesKey::Disk),
         ),
         (
             "NETWORK",
@@ -137,7 +139,7 @@ pub fn resources(frame: &mut Frame, area: Rect, app: &App) {
             tx.map(|value| format!("↑ {}", rate(value)))
                 .unwrap_or_else(|| "↑ N/A".into()),
             None,
-            &app.histories[3],
+            network_history,
         ),
     ];
     let rows = Layout::default()
@@ -164,7 +166,7 @@ pub fn resources(frame: &mut Frame, area: Rect, app: &App) {
 fn resource_card(
     frame: &mut Frame,
     area: Rect,
-    card: &(&str, String, String, Option<f64>, &Vec<u64>),
+    card: &(&str, String, String, Option<f64>, Vec<u64>),
     focused: bool,
     palette: &theme::Palette,
 ) {
@@ -223,7 +225,7 @@ fn resource_card(
         };
         frame.render_widget(
             Sparkline::default()
-                .data(*history)
+                .data(history)
                 .max(if usage.is_some() {
                     100
                 } else {
@@ -326,16 +328,7 @@ pub fn network(frame: &mut Frame, area: Rect, app: &App) {
         return;
     }
     let palette = app.ui.theme.palette();
-    let summaries = app
-        .snapshot
-        .as_ref()
-        .map(|snapshot| snapshot.network_summaries.as_slice())
-        .unwrap_or(&[]);
-    let selected = summaries.get(
-        app.ui
-            .network_interface
-            .min(summaries.len().saturating_sub(1)),
-    );
+    let selected = selected_interface(app);
     let sections = Layout::vertical([
         Constraint::Length(6),
         Constraint::Length(7),
@@ -344,41 +337,36 @@ pub fn network(frame: &mut Frame, area: Rect, app: &App) {
     .split(area);
     let columns = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(sections[0]);
-    let (download, upload) = selected
-        .map(|item| {
-            (
-                item.download_rate.unwrap_or(0.0),
-                item.upload_rate.unwrap_or(0.0),
-            )
-        })
-        .unwrap_or((0.0, 0.0));
+    let download_history = selected
+        .map(|i| app.history.series(&SeriesKey::NetRx(i.name.clone())))
+        .unwrap_or_default();
+    let upload_history = selected
+        .map(|i| app.history.series(&SeriesKey::NetTx(i.name.clone())))
+        .unwrap_or_default();
     network_card(
         frame,
         columns[0],
         "DOWNLOAD",
-        rate_or_na(if selected.is_none() {
-            None
-        } else {
-            Some(download)
-        }),
-        palette.ok,
-        &app.histories[3],
+        rate_or_na(selected.and_then(|i| i.rx_rate)),
+        palette.chart_rx,
+        &download_history,
         &palette,
     );
     network_card(
         frame,
         columns[1],
         "UPLOAD",
-        rate_or_na(if selected.is_none() {
-            None
-        } else {
-            Some(upload)
-        }),
-        palette.accent,
-        &app.histories[3],
+        rate_or_na(selected.and_then(|i| i.tx_rate)),
+        palette.chart_tx,
+        &upload_history,
         &palette,
     );
-    let rows = summaries.iter().map(network_row).collect::<Vec<_>>();
+    let rows = app
+        .state
+        .interfaces
+        .iter()
+        .map(network_row)
+        .collect::<Vec<_>>();
     let table = Table::new(
         if rows.is_empty() {
             vec![Row::new(["No network interfaces", "", "", "", ""])]
@@ -405,9 +393,7 @@ pub fn network(frame: &mut Frame, area: Rect, app: &App) {
             .borders(Borders::ALL)
             .title(format!(
                 " NETWORK / DOWNLOAD  {} ",
-                selected
-                    .map(|item| item.interface.as_str())
-                    .unwrap_or("N/A")
+                selected.map(|item| item.name.as_str()).unwrap_or("N/A")
             ))
             .title_style(Style::default().fg(palette.accent))
             .border_style(Style::default().fg(palette.border))
@@ -417,34 +403,47 @@ pub fn network(frame: &mut Frame, area: Rect, app: &App) {
     .column_spacing(1);
     frame.render_widget(table, sections[1]);
 
-    let all_connections = selected
-        .map(|summary| summary.connections.as_slice())
-        .unwrap_or(&[]);
-    let connection_offset = app
+    let mut talkers: Vec<&ProcessInfo> = app
+        .state
+        .processes
+        .iter()
+        .filter(|process| process.traffic.is_some())
+        .collect();
+    talkers.sort_by(|a, b| {
+        let total = |p: &ProcessInfo| p.traffic.map_or(0.0, |t| t.rx + t.tx);
+        total(b).total_cmp(&total(a))
+    });
+    let offset = app
         .ui
         .scroll_offsets
         .get(&Panel::Network)
         .copied()
         .unwrap_or(0) as usize;
-    let connections = all_connections
-        .get(connection_offset.min(all_connections.len())..)
-        .unwrap_or(&[]);
-    let connection_rows = connections.iter().map(connection_row).collect::<Vec<_>>();
-    let connection_table = Table::new(
-        if connection_rows.is_empty() {
-            vec![Row::new(["No active connections", "", "", ""])]
+    let empty = if app.state.issue(crate::state::Source::Traffic).is_some() {
+        "Traffic unavailable"
+    } else {
+        "No process traffic yet"
+    };
+    let rows: Vec<Row> = talkers
+        .iter()
+        .skip(offset.min(talkers.len()))
+        .map(|process| traffic_row(process))
+        .collect();
+    let traffic_table = Table::new(
+        if rows.is_empty() {
+            vec![Row::new([empty, "", "", ""])]
         } else {
-            connection_rows
+            rows
         },
         [
-            Constraint::Length(24),
-            Constraint::Min(24),
-            Constraint::Length(10),
-            Constraint::Length(14),
+            Constraint::Min(20),
+            Constraint::Length(8),
+            Constraint::Length(12),
+            Constraint::Length(12),
         ],
     )
     .header(
-        Row::new(["PROCESS", "REMOTE", "TYPE", "TRAFFIC"]).style(
+        Row::new(["PROCESS", "PID", "DOWN", "UP"]).style(
             Style::default()
                 .fg(palette.text_muted)
                 .add_modifier(Modifier::BOLD),
@@ -453,13 +452,13 @@ pub fn network(frame: &mut Frame, area: Rect, app: &App) {
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .title(format!(" CONNECTIONS ({}) ", connections.len()))
+            .title(format!(" PROCESS TRAFFIC ({}) ", talkers.len()))
             .title_style(Style::default().fg(palette.accent))
             .border_style(Style::default().fg(palette.border))
             .style(Style::default().bg(palette.surface)),
     )
     .style(Style::default().fg(palette.text));
-    frame.render_widget(connection_table, sections[2]);
+    frame.render_widget(traffic_table, sections[2]);
 }
 
 pub fn disks(frame: &mut Frame, area: Rect, app: &App) {
@@ -468,55 +467,14 @@ pub fn disks(frame: &mut Frame, area: Rect, app: &App) {
     }
     let palette = app.ui.theme.palette();
     let rows = app
-        .snapshot
-        .as_ref()
-        .map(|snapshot| {
-            snapshot
-                .metrics
-                .iter()
-                .filter(|metric| {
-                    metric.name.starts_with("disk.") && metric.name.ends_with(".usage")
-                })
-                .map(|metric| {
-                    let mount = metric
-                        .name
-                        .strip_prefix("disk.")
-                        .unwrap_or("N/A")
-                        .strip_suffix(".usage")
-                        .unwrap_or("N/A");
-                    let prefix = format!("disk.{mount}");
-                    let find = |suffix: &str| {
-                        snapshot
-                            .metrics
-                            .iter()
-                            .find(|item| item.name == format!("{prefix}.{suffix}"))
-                            .and_then(|item| item.value)
-                    };
-                    Row::new([
-                        mount.to_owned(),
-                        metric
-                            .value
-                            .map(|value| format!("{value:.0}%"))
-                            .unwrap_or_else(|| "N/A".into()),
-                        find("used")
-                            .map(|value| bytes(value as u64))
-                            .unwrap_or_else(|| "N/A".into()),
-                        find("free")
-                            .map(|value| bytes(value as u64))
-                            .unwrap_or_else(|| "N/A".into()),
-                        find("total")
-                            .map(|value| bytes(value as u64))
-                            .unwrap_or_else(|| "N/A".into()),
-                        find("read").map(rate).unwrap_or_else(|| "N/A".into()),
-                        find("write").map(rate).unwrap_or_else(|| "N/A".into()),
-                    ])
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+        .state
+        .visible_disks()
+        .into_iter()
+        .map(disk_row)
+        .collect::<Vec<_>>();
     let table = Table::new(
         if rows.is_empty() {
-            vec![Row::new(["No disks", "", "", "", "", "", ""])]
+            vec![Row::new(["No disks", "", "", "", ""])]
         } else {
             rows
         },
@@ -526,12 +484,10 @@ pub fn disks(frame: &mut Frame, area: Rect, app: &App) {
             Constraint::Length(14),
             Constraint::Length(14),
             Constraint::Length(14),
-            Constraint::Length(14),
-            Constraint::Length(14),
         ],
     )
     .header(
-        Row::new(["MOUNT", "USAGE", "USED", "FREE", "TOTAL", "READ", "WRITE"]).style(
+        Row::new(["MOUNT", "USAGE", "USED", "FREE", "TOTAL"]).style(
             Style::default()
                 .fg(palette.text_muted)
                 .add_modifier(Modifier::BOLD),
@@ -555,16 +511,16 @@ pub fn more(frame: &mut Frame, area: Rect, app: &App) {
     }
     let palette = app.ui.theme.palette();
     let temperature = app
-        .snapshot
-        .as_ref()
-        .and_then(|snapshot| value(snapshot, "temperature.celsius"))
+        .state
+        .cpu
+        .temperature
         .map(|value| format!("{value:.0}°C"))
         .unwrap_or_else(|| "N/A".into());
     let battery = app
-        .snapshot
+        .state
+        .battery
         .as_ref()
-        .and_then(|snapshot| value(snapshot, "battery.percent"))
-        .map(|value| format!("{value:.0}%"))
+        .map(|b| format!("{:.0}%", b.percent))
         .unwrap_or_else(|| "N/A".into());
     let mut lines = vec![
         Line::from(Span::styled(
@@ -615,7 +571,7 @@ fn network_card(
     title: &str,
     main: String,
     color: ratatui::style::Color,
-    history: &Vec<u64>,
+    history: &[u64],
     palette: &theme::Palette,
 ) {
     let block = Block::default()
@@ -654,39 +610,6 @@ fn network_card(
     }
 }
 
-fn network_row(summary: &NetworkSummary) -> Row<'static> {
-    let total = summary.download_total.saturating_add(summary.upload_total);
-    Row::new([
-        summary.interface.clone(),
-        summary
-            .download_rate
-            .map(rate)
-            .unwrap_or_else(|| "N/A".into()),
-        summary
-            .upload_rate
-            .map(rate)
-            .unwrap_or_else(|| "N/A".into()),
-        bytes(total),
-        format!(
-            "↓ {} ↑ {}",
-            rate(summary.peak_download),
-            rate(summary.peak_upload)
-        ),
-    ])
-}
-
-fn connection_row(connection: &ConnectionSummary) -> Row<'static> {
-    Row::new([
-        connection.process.clone(),
-        connection.remote.clone(),
-        connection.direction.clone(),
-        connection
-            .bytes_per_second
-            .map(rate)
-            .unwrap_or_else(|| "N/A".into()),
-    ])
-}
-
 fn rate_or_na(value: Option<f64>) -> String {
     value.map(rate).unwrap_or_else(|| "N/A".into())
 }
@@ -716,10 +639,7 @@ pub fn details(frame: &mut Frame, area: Rect, app: &App) {
     }
     let palette = app.ui.theme.palette();
     let selected = app.selected_process();
-    let warning = app
-        .snapshot
-        .as_ref()
-        .and_then(|snapshot| snapshot.warnings.first());
+    let warning = app.state.issues().next();
     let mut lines = Vec::new();
     if let Some(notice) = &app.notice {
         lines.push(Line::from(Span::styled(
@@ -728,9 +648,9 @@ pub fn details(frame: &mut Frame, area: Rect, app: &App) {
                 .fg(palette.warn)
                 .add_modifier(Modifier::BOLD),
         )));
-    } else if let Some(warning) = warning {
+    } else if let Some((source, message)) = warning {
         lines.push(Line::from(Span::styled(
-            format!(" WARNING  {}: {}", warning.collector, warning.message),
+            format!(" WARNING  {source:?}: {message}"),
             Style::default()
                 .fg(palette.warn)
                 .add_modifier(Modifier::BOLD),
@@ -925,14 +845,10 @@ pub fn confirmation_modal(frame: &mut Frame, area: Rect, app: &App) {
     }
     let palette = app.ui.theme.palette();
     let name = app
-        .snapshot
-        .as_ref()
-        .and_then(|snapshot| {
-            snapshot
-                .processes
-                .iter()
-                .find(|process| process.identity == pending.identity())
-        })
+        .state
+        .processes
+        .iter()
+        .find(|p| p.identity == pending.identity())
         .map(|process| process.name.as_str())
         .unwrap_or("N/A");
     let action = match pending.kind() {
@@ -985,111 +901,105 @@ fn centered(area: Rect, width: u16, height: u16) -> Rect {
     }
 }
 
-fn value(snapshot: &SystemSnapshot, name: &str) -> Option<f64> {
-    snapshot
-        .metrics
-        .iter()
-        .find(|metric| metric.name == name)?
-        .value
-}
-
-fn disk_usage(snapshot: &SystemSnapshot) -> Option<f64> {
-    value(snapshot, "disk./.usage").or_else(|| {
-        snapshot
-            .metrics
-            .iter()
-            .find(|metric| metric.name.starts_with("disk.") && metric.name.ends_with(".usage"))
-            .and_then(|metric| metric.value)
-    })
-}
-
-fn disk_metric(snapshot: &SystemSnapshot, suffix: &str) -> Option<f64> {
-    value(snapshot, &format!("disk./.{suffix}")).or_else(|| {
-        snapshot
-            .metrics
-            .iter()
-            .find(|metric| {
-                metric.name.starts_with("disk.") && metric.name.ends_with(&format!(".{suffix}"))
-            })
-            .and_then(|metric| metric.value)
-    })
-}
-
-fn cpu_detail(snapshot: Option<&SystemSnapshot>) -> String {
-    let Some(snapshot) = snapshot else {
-        return "CORES N/A · IDLE N/A".into();
-    };
-    let cores = value(snapshot, "cpu.cores")
-        .map(|cores| format!("{cores:.0} CORES"))
+fn cpu_detail(state: &SystemState) -> String {
+    let cpu = &state.cpu;
+    let cores = cpu
+        .cores
+        .map(|cores| format!("{cores} CORES"))
         .unwrap_or_else(|| "CORES N/A".into());
-    let idle = value(snapshot, "cpu.idle")
+    let idle = cpu
+        .idle()
         .map(|idle| format!("IDLE {idle:.0}%"))
         .unwrap_or_else(|| "IDLE N/A".into());
-    let load = value(snapshot, "load.1")
-        .map(|load| format!("LOAD {load:.2}"))
-        .unwrap_or_else(|| "LOAD N/A".into());
-    let temperature = value(snapshot, "temperature.celsius")
-        .map(|temperature| format!("TEMP {temperature:.0}°C"))
-        .unwrap_or_else(|| "TEMP N/A".into());
-    let breakdown = match (value(snapshot, "cpu.user"), value(snapshot, "cpu.system")) {
+    let breakdown = match (cpu.user, cpu.system) {
         (Some(user), Some(system)) => format!("USER {user:.0}% · SYS {system:.0}%"),
         _ => "USER N/A · SYS N/A".into(),
     };
+    let load = cpu
+        .load
+        .map(|load| format!("LOAD {:.2}", load[0]))
+        .unwrap_or_else(|| "LOAD N/A".into());
+    let temperature = cpu
+        .temperature
+        .map(|t| format!("TEMP {t:.0}°C"))
+        .unwrap_or_else(|| "TEMP N/A".into());
     format!("{cores} · {idle} · {breakdown} · {load} · {temperature}")
 }
 
-fn memory_detail(snapshot: Option<&SystemSnapshot>) -> String {
-    let Some(snapshot) = snapshot else {
-        return "USED N/A · FREE N/A".into();
-    };
-    let used = value(snapshot, "memory.used").map(|value| bytes(value as u64));
-    let free = value(snapshot, "memory.free").map(|value| bytes(value as u64));
-    let available = value(snapshot, "memory.available").map(|value| bytes(value as u64));
-    let swap = value(snapshot, "memory.swap.used").map(|value| bytes(value as u64));
+fn opt_bytes(value: Option<u64>) -> String {
+    value.map(bytes).unwrap_or_else(|| "N/A".into())
+}
+
+fn memory_detail(state: &SystemState) -> String {
+    let memory = &state.memory;
     format!(
         "USED {} · FREE {} · AVAIL {} · SWAP {}",
-        used.unwrap_or_else(|| "N/A".into()),
-        free.unwrap_or_else(|| "N/A".into()),
-        available.unwrap_or_else(|| "N/A".into()),
-        swap.unwrap_or_else(|| "N/A".into())
+        opt_bytes(memory.used),
+        opt_bytes(memory.free),
+        opt_bytes(memory.available),
+        opt_bytes(memory.swap_used)
     )
 }
 
-fn disk_detail(snapshot: Option<&SystemSnapshot>) -> String {
-    let Some(snapshot) = snapshot else {
-        return "USED N/A · FREE N/A".into();
-    };
+fn disk_detail(state: &SystemState) -> String {
+    let disk = state.primary_disk();
     format!(
         "USED {} · FREE {} · TOTAL {}",
-        disk_metric(snapshot, "used")
-            .map(|value| bytes(value as u64))
-            .unwrap_or_else(|| "N/A".into()),
-        disk_metric(snapshot, "free")
-            .map(|value| bytes(value as u64))
-            .unwrap_or_else(|| "N/A".into()),
-        disk_metric(snapshot, "total")
-            .map(|value| bytes(value as u64))
-            .unwrap_or_else(|| "N/A".into())
+        opt_bytes(disk.map(|d| d.used)),
+        opt_bytes(disk.map(|d| d.free)),
+        opt_bytes(disk.map(|d| d.total))
     )
 }
 
-fn network_rates(snapshot: &SystemSnapshot) -> (Option<f64>, Option<f64>) {
-    let mut rx = Vec::new();
-    let mut tx = Vec::new();
-    for metric in &snapshot.metrics {
-        if metric.name.starts_with("network.") {
-            if metric.name.ends_with(".received") {
-                rx.extend(metric.value);
-            }
-            if metric.name.ends_with(".transmitted") {
-                tx.extend(metric.value);
-            }
-        }
-    }
-    (
-        (!rx.is_empty()).then(|| rx.iter().sum()),
-        (!tx.is_empty()).then(|| tx.iter().sum()),
+fn total_rates(state: &SystemState) -> (Option<f64>, Option<f64>) {
+    let sum = |pick: fn(&InterfaceStats) -> Option<f64>| {
+        let values: Vec<f64> = state.interfaces.iter().filter_map(pick).collect();
+        (!values.is_empty()).then(|| values.iter().sum())
+    };
+    (sum(|i| i.rx_rate), sum(|i| i.tx_rate))
+}
+
+fn selected_interface(app: &App) -> Option<&InterfaceStats> {
+    let interfaces = &app.state.interfaces;
+    interfaces.get(
+        app.ui
+            .network_interface
+            .min(interfaces.len().saturating_sub(1)),
     )
+}
+
+fn network_row(interface: &InterfaceStats) -> Row<'static> {
+    Row::new([
+        interface.name.clone(),
+        interface.rx_rate.map(rate).unwrap_or_else(|| "N/A".into()),
+        interface.tx_rate.map(rate).unwrap_or_else(|| "N/A".into()),
+        bytes(interface.rx_total.saturating_add(interface.tx_total)),
+        format!(
+            "↓ {} ↑ {}",
+            rate(interface.peak_rx),
+            rate(interface.peak_tx)
+        ),
+    ])
+}
+
+fn traffic_row(process: &ProcessInfo) -> Row<'static> {
+    let traffic = process.traffic;
+    Row::new([
+        process.name.clone(),
+        process.identity.pid.to_string(),
+        traffic.map(|t| rate(t.rx)).unwrap_or_else(|| "N/A".into()),
+        traffic.map(|t| rate(t.tx)).unwrap_or_else(|| "N/A".into()),
+    ])
+}
+
+fn disk_row(disk: &DiskStats) -> Row<'static> {
+    Row::new([
+        disk.mount.clone(),
+        percent(disk.usage_percent()),
+        bytes(disk.used),
+        bytes(disk.free),
+        bytes(disk.total),
+    ])
 }
 
 fn usage_color(value: f64, palette: &theme::Palette) -> ratatui::style::Color {

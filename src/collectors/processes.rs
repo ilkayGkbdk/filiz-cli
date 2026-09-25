@@ -2,11 +2,7 @@ use std::collections::HashSet;
 
 use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind, Users};
 
-use crate::model::{
-    CollectorData, CollectorResult, CollectorWarning, ProcessIdentity, ProcessInfo,
-};
-
-use super::Collector;
+use crate::model::{ProcessIdentity, ProcessInfo};
 
 pub struct ProcessCollector {
     system: System,
@@ -22,16 +18,8 @@ impl ProcessCollector {
             previous_processes: HashSet::new(),
         }
     }
-}
 
-impl Default for ProcessCollector {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Collector for ProcessCollector {
-    fn collect(&mut self) -> CollectorResult {
+    pub fn sample(&mut self) -> Vec<ProcessInfo> {
         self.system.refresh_processes_specifics(
             ProcessesToUpdate::All,
             true,
@@ -41,9 +29,8 @@ impl Collector for ProcessCollector {
                 .with_cmd(UpdateKind::OnlyIfNotSet)
                 .with_user(UpdateKind::OnlyIfNotSet),
         );
-
-        let mut result = CollectorData::default();
-        let mut current_processes = HashSet::new();
+        let mut processes = Vec::new();
+        let mut current = HashSet::new();
         for (pid, process) in self.system.processes() {
             let identity = ProcessIdentity {
                 pid: pid.as_u32(),
@@ -62,7 +49,7 @@ impl Collector for ProcessCollector {
                     .find(|user| user.id() == id)
                     .map(|user| user.name().to_owned())
             });
-            result.processes.push(ProcessInfo {
+            processes.push(ProcessInfo {
                 identity,
                 name: process.name().to_string_lossy().into_owned(),
                 command,
@@ -75,16 +62,16 @@ impl Collector for ProcessCollector {
                 status: Some(process.status().to_string()),
                 traffic: None,
             });
-            current_processes.insert(identity);
+            current.insert(identity);
         }
-        self.previous_processes = current_processes;
-        result.processes.sort_by_key(|process| process.identity.pid);
-        if result.processes.is_empty() {
-            result.warnings.push(CollectorWarning {
-                collector: "processes".to_owned(),
-                message: "no processes available".to_owned(),
-            });
-        }
-        Ok(result)
+        self.previous_processes = current;
+        processes.sort_by_key(|process| process.identity.pid);
+        processes
+    }
+}
+
+impl Default for ProcessCollector {
+    fn default() -> Self {
+        Self::new()
     }
 }

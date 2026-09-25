@@ -1,8 +1,9 @@
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use filiz::app::App;
-use filiz::model::{ProcessIdentity, ProcessInfo, ResourceMetric, SystemSnapshot};
+use filiz::model::{ProcessIdentity, ProcessInfo};
+use filiz::state::{CollectorUpdate, DiskStats, InterfaceStats, MemoryStats, SystemSample};
 use filiz::ui::{
     render,
     state::{LayoutDensity, UiCommand, UiState, Workspace},
@@ -11,25 +12,29 @@ use ratatui::{backend::TestBackend, Terminal};
 
 fn sample_app() -> App {
     let mut app = App::new(Duration::from_secs(2));
-    app.replace_snapshot(SystemSnapshot {
-        captured_at: SystemTime::now(),
-        metrics: vec![
-            ResourceMetric {
-                name: "cpu.usage".into(),
-                value: Some(35.0),
-                unit: "%".into(),
-            },
-            ResourceMetric {
-                name: "memory.usage".into(),
-                value: Some(62.0),
-                unit: "%".into(),
-            },
-            ResourceMetric {
-                name: "disk./.usage".into(),
-                value: Some(91.0),
-                unit: "%".into(),
-            },
-        ],
+    app.apply_update(CollectorUpdate::System(SystemSample {
+        cpu_usage: Some(35.0),
+        memory: MemoryStats {
+            total: Some(32 * 1024 * 1024 * 1024),
+            used: Some(20 * 1024 * 1024 * 1024),
+            ..Default::default()
+        },
+        disks: vec![DiskStats {
+            mount: "/".into(),
+            total: 100,
+            used: 91,
+            free: 9,
+            is_system: false,
+        }],
+        interfaces: vec![InterfaceStats {
+            name: "en0".into(),
+            rx_rate: Some(1024.0),
+            tx_rate: Some(512.0),
+            rx_total: 0,
+            tx_total: 0,
+            peak_rx: 0.0,
+            peak_tx: 0.0,
+        }],
         processes: vec![ProcessInfo {
             identity: ProcessIdentity {
                 pid: 42,
@@ -43,10 +48,9 @@ fn sample_app() -> App {
             status: Some("Running".into()),
             traffic: None,
         }],
-        network_summaries: Vec::new(),
-        events: Vec::new(),
-        warnings: Vec::new(),
-    });
+        uptime: Some(Duration::from_secs(3600)),
+        ..Default::default()
+    }));
     app
 }
 
@@ -155,4 +159,43 @@ fn workspace_content_and_theme_controls_are_visible() {
     let output = screen(&app, 110, 35);
     assert!(output.contains("MORE / SETTINGS"));
     assert!(output.contains("for betül, with love"));
+}
+
+#[test]
+fn missing_sensors_keep_status_normal_but_failures_warn() {
+    let mut app = sample_app();
+    assert!(screen(&app, 110, 35).contains("SYSTEM NORMAL"));
+    app.apply_update(CollectorUpdate::Failed {
+        source: filiz::state::Source::Platform,
+        message: "top failed".into(),
+    });
+    assert!(screen(&app, 110, 35).contains("CHECK METRICS"));
+}
+
+#[test]
+fn disks_workspace_hides_system_volumes() {
+    let mut app = sample_app();
+    let sample = SystemSample {
+        disks: vec![
+            DiskStats {
+                mount: "/".into(),
+                total: 100,
+                used: 50,
+                free: 50,
+                is_system: false,
+            },
+            DiskStats {
+                mount: "/System/Volumes/VM".into(),
+                total: 100,
+                used: 1,
+                free: 99,
+                is_system: true,
+            },
+        ],
+        ..Default::default()
+    };
+    app.apply_update(CollectorUpdate::System(sample));
+    app.ui.workspace = Workspace::Disks;
+    let output = screen(&app, 110, 35);
+    assert!(!output.contains("/System/Volumes/VM"));
 }

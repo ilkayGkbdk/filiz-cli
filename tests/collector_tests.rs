@@ -1,36 +1,11 @@
-#[allow(dead_code)]
-#[path = "../src/collectors/mod.rs"]
-mod collectors;
-#[allow(dead_code)]
-#[path = "../src/model.rs"]
-mod model;
-
-use collectors::macos::{parse_battery, parse_cpu_usage, MacOsCollector};
-use collectors::system::{byte_rate, parse_nettop_csv, percentage};
-use collectors::Collector;
+use filiz::collectors::macos::{parse_battery, parse_cpu_usage};
+use filiz::collectors::processes::ProcessCollector;
+use filiz::collectors::system::{byte_rate, percentage, SystemCollector};
 
 #[test]
 fn byte_rate_uses_elapsed_seconds_between_fixed_samples() {
     assert_eq!(byte_rate(1_000, 3_500, 2.5), Some(1_000.0));
     assert_eq!(byte_rate(3_500, 4_000, 0.5), Some(1_000.0));
-}
-
-#[test]
-fn macos_cpu_parser_extracts_user_and_system_percentages() {
-    assert_eq!(
-        parse_cpu_usage("CPU usage: 12.50% user, 4.25% sys, 83.25% idle"),
-        (Some(12.5), Some(4.25))
-    );
-}
-
-#[test]
-fn nettop_csv_parser_extracts_process_traffic() {
-    let rows =
-        parse_nettop_csv("process,remote,bytes_in,bytes_out\nSafari,example.com:443,1200,800\n");
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].process, "Safari");
-    assert_eq!(rows[0].remote, "example.com:443");
-    assert_eq!(rows[0].bytes_per_second, Some(2000.0));
 }
 
 #[test]
@@ -47,55 +22,11 @@ fn percentage_converts_two_fixed_samples() {
 }
 
 #[test]
-fn collector_set_returns_usable_snapshot() {
-    let mut collectors = collectors::CollectorSet::new();
-    let snapshot = collectors.snapshot();
-    assert!(snapshot
-        .metrics
-        .iter()
-        .any(|metric| metric.name == "uptime"));
-    assert!(snapshot
-        .metrics
-        .iter()
-        .any(|metric| metric.name == "memory.used"));
-}
-
-#[test]
-fn process_collector_preserves_start_time_and_pid_order() {
-    let mut collector = collectors::processes::ProcessCollector::new();
-    let result = collector.collect().expect("process collection");
-    assert!(result
-        .processes
-        .windows(2)
-        .all(|pair| pair[0].identity.pid < pair[1].identity.pid));
-    let current_pid = sysinfo::get_current_pid().expect("current PID").as_u32();
-    let current = result
-        .processes
-        .iter()
-        .find(|process| process.identity.pid == current_pid)
-        .expect("current process is present");
-    assert!(current.identity.start_time > 0);
-}
-
-#[test]
-fn process_cpu_is_unavailable_until_a_second_refresh() {
-    let mut collector = collectors::processes::ProcessCollector::new();
-    let first = collector.collect().expect("first collection");
-    let current_pid = sysinfo::get_current_pid().expect("current PID").as_u32();
-    let first_current = first
-        .processes
-        .iter()
-        .find(|process| process.identity.pid == current_pid)
-        .expect("current process is present");
-    assert_eq!(first_current.cpu_percent, None);
-
-    let second = collector.collect().expect("second collection");
-    let second_current = second
-        .processes
-        .iter()
-        .find(|process| process.identity.pid == current_pid)
-        .expect("current process is present");
-    assert!(second_current.cpu_percent.is_some());
+fn macos_cpu_parser_extracts_user_and_system_percentages() {
+    assert_eq!(
+        parse_cpu_usage("CPU usage: 12.50% user, 4.25% sys, 83.25% idle"),
+        (Some(12.5), Some(4.25))
+    );
 }
 
 #[test]
@@ -121,31 +52,36 @@ fn macos_battery_parser_keeps_percent_when_status_is_unavailable() {
 }
 
 #[test]
-fn macos_collector_reports_unavailable_fields_with_warnings() {
-    let values = MacOsCollector::new().collect();
-    if values.battery_percent.is_none() {
-        assert!(values
-            .warnings
-            .iter()
-            .any(|warning| warning.collector == "battery"));
-    }
-    if values.temperature_celsius.is_none() {
-        assert!(values
-            .warnings
-            .iter()
-            .any(|warning| warning.collector == "temperature"));
-    }
+fn system_sample_reports_memory_uptime_and_rates_after_second_sample() {
+    let mut collector = SystemCollector::new();
+    let first = collector.sample();
+    assert!(first.memory.total.is_some());
+    assert!(first.uptime.is_some());
+    assert_eq!(first.cpu_usage, None, "first CPU sample has no baseline");
+    assert!(first.interfaces.iter().all(|i| i.rx_rate.is_none()));
+    let second = collector.sample();
+    assert!(second.cpu_usage.is_some());
+    assert!(second.processes.is_empty());
 }
 
 #[test]
-fn snapshot_includes_macos_metric_slots() {
-    let snapshot = collectors::CollectorSet::new().snapshot();
-    assert!(snapshot
-        .metrics
+fn process_sample_preserves_start_time_and_pid_order() {
+    let mut collector = ProcessCollector::new();
+    let processes = collector.sample();
+    assert!(processes
+        .windows(2)
+        .all(|pair| pair[0].identity.pid < pair[1].identity.pid));
+    let current_pid = std::process::id();
+    let current = processes
         .iter()
-        .any(|metric| metric.name == "battery.percent"));
-    assert!(snapshot
-        .metrics
+        .find(|process| process.identity.pid == current_pid)
+        .expect("current process is present");
+    assert!(current.identity.start_time > 0);
+    assert_eq!(current.cpu_percent, None);
+    let second = collector.sample();
+    let current = second
         .iter()
-        .any(|metric| metric.name == "temperature.celsius"));
+        .find(|process| process.identity.pid == current_pid)
+        .unwrap();
+    assert!(current.cpu_percent.is_some());
 }

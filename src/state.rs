@@ -175,6 +175,12 @@ impl SystemState {
         self.issues.get(&source).map(String::as_str)
     }
 
+    pub fn issues(&self) -> impl Iterator<Item = (Source, &str)> {
+        self.issues
+            .iter()
+            .map(|(source, message)| (*source, message.as_str()))
+    }
+
     pub fn primary_disk(&self) -> Option<&DiskStats> {
         self.disks
             .iter()

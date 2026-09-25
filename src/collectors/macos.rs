@@ -1,12 +1,9 @@
+#[cfg(target_os = "macos")]
 use std::process::Command;
 
 use sysinfo::Components;
 
-use crate::model::{
-    CollectorData, CollectorResult, CollectorWarning, MacOsMetrics, ResourceMetric,
-};
-
-use super::Collector;
+use crate::state::{Battery, PlatformSample};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct BatteryReading {
@@ -78,81 +75,46 @@ impl MacOsCollector {
         }
     }
 
-    pub fn collect(&mut self) -> MacOsMetrics {
-        let mut result = MacOsMetrics::default();
+    pub fn sample(&mut self) -> PlatformSample {
+        let mut sample = PlatformSample::default();
         #[cfg(target_os = "macos")]
         {
-            match Command::new("/usr/bin/top")
+            if let Ok(output) = Command::new("/usr/bin/top")
                 .args(["-l", "1", "-n", "0"])
                 .output()
             {
-                Ok(output) if output.status.success() => {
+                if output.status.success() {
                     let (user, system) = parse_cpu_usage(&String::from_utf8_lossy(&output.stdout));
-                    result.cpu_user_percent = user;
-                    result.cpu_system_percent = system;
+                    sample.cpu_user = user;
+                    sample.cpu_system = system;
                 }
-                _ => {}
             }
-            match Command::new("/usr/bin/pmset").args(["-g", "batt"]).output() {
-                Ok(output) if output.status.success() => {
-                    match parse_battery(&String::from_utf8_lossy(&output.stdout)) {
-                        Some(battery) => {
-                            result.battery_percent = Some(battery.percent);
-                            result.battery_power_source = battery.power_source;
-                            result.battery_charging = battery.charging;
-                            if result.battery_power_source.is_none() {
-                                warn(&mut result, "battery", "battery power source unavailable");
+            if let Ok(output) = Command::new("/usr/bin/pmset").args(["-g", "batt"]).output() {
+                if output.status.success() {
+                    sample.battery =
+                        parse_battery(&String::from_utf8_lossy(&output.stdout)).map(|reading| {
+                            Battery {
+                                percent: reading.percent,
+                                charging: reading.charging,
+                                power_source: reading.power_source,
                             }
-                            if result.battery_charging.is_none() {
-                                warn(&mut result, "battery", "battery charging state unavailable");
-                            }
-                        }
-                        None => warn(&mut result, "battery", "battery data unavailable"),
-                    }
+                        });
                 }
-                Ok(_) => warn(&mut result, "battery", "pmset could not read battery data"),
-                Err(error) => warn(
-                    &mut result,
-                    "battery",
-                    &format!("pmset unavailable: {error}"),
-                ),
-            }
-
-            self.components.refresh_list();
-            let candidate = self
-                .components
-                .list()
-                .iter()
-                .filter(|component| {
-                    component.temperature().is_finite() && component.temperature() > 0.0
-                })
-                .find(|component| component.label().to_ascii_lowercase().contains("cpu"))
-                .or_else(|| {
-                    self.components.list().iter().find(|component| {
-                        component.temperature().is_finite() && component.temperature() > 0.0
-                    })
-                });
-            result.temperature_celsius =
-                candidate.map(|component| f64::from(component.temperature()));
-            if result.temperature_celsius.is_none() {
-                warn(&mut result, "temperature", "temperature sensor unavailable");
             }
         }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = &self.components;
-            warn(
-                &mut result,
-                "battery",
-                "battery data is available only on macOS",
-            );
-            warn(
-                &mut result,
-                "temperature",
-                "temperature data is available only on macOS",
-            );
-        }
-        result
+        self.components.refresh_list();
+        let readable = |component: &&sysinfo::Component| {
+            component.temperature().is_finite() && component.temperature() > 0.0
+        };
+        sample.temperature = self
+            .components
+            .list()
+            .iter()
+            .filter(readable)
+            .find(|component| component.label().to_ascii_lowercase().contains("cpu"))
+            .or_else(|| self.components.list().iter().find(readable))
+            .map(|component| f64::from(component.temperature()));
+        sample
     }
 }
 
@@ -160,50 +122,4 @@ impl Default for MacOsCollector {
     fn default() -> Self {
         Self::new()
     }
-}
-
-impl Collector for MacOsCollector {
-    fn collect(&mut self) -> CollectorResult {
-        let values = MacOsCollector::collect(self);
-        Ok(CollectorData {
-            metrics: vec![
-                ResourceMetric {
-                    name: "cpu.user".to_owned(),
-                    value: values.cpu_user_percent,
-                    unit: "%".to_owned(),
-                },
-                ResourceMetric {
-                    name: "cpu.system".to_owned(),
-                    value: values.cpu_system_percent,
-                    unit: "%".to_owned(),
-                },
-                ResourceMetric {
-                    name: "battery.percent".to_owned(),
-                    value: values.battery_percent,
-                    unit: "%".to_owned(),
-                },
-                ResourceMetric {
-                    name: "battery.charging".to_owned(),
-                    value: values
-                        .battery_charging
-                        .map(|charging| if charging { 1.0 } else { 0.0 }),
-                    unit: "bool".to_owned(),
-                },
-                ResourceMetric {
-                    name: "temperature.celsius".to_owned(),
-                    value: values.temperature_celsius,
-                    unit: "°C".to_owned(),
-                },
-            ],
-            warnings: values.warnings,
-            ..Default::default()
-        })
-    }
-}
-
-fn warn(result: &mut MacOsMetrics, collector: &str, message: &str) {
-    result.warnings.push(CollectorWarning {
-        collector: collector.to_owned(),
-        message: message.to_owned(),
-    });
 }
