@@ -168,6 +168,64 @@ fn missing_sensors_keep_status_normal_but_failures_warn() {
 }
 
 #[test]
+fn processes_workspace_has_its_own_layout() {
+    let mut app = sample_app();
+    let overview = screen(&app, 110, 35);
+    assert!(overview.contains("CORES"), "overview shows resource cards");
+    app.ui.set_workspace(Workspace::Processes);
+    let processes = screen(&app, 110, 35);
+    assert!(!processes.contains("CORES"));
+    assert!(processes.contains("PROCESSES"));
+    assert!(processes.contains("DETAILS / EVENTS"));
+    assert!(processes.contains("example-worker"));
+}
+
+#[test]
+fn hide_works_in_every_workspace() {
+    let mut app = sample_app();
+    app.ui.set_workspace(Workspace::Processes);
+    app.ui.focus = PanelId::Details;
+    app.ui.toggle_panel();
+    assert!(!screen(&app, 110, 35).contains("DETAILS / EVENTS"));
+
+    app.ui.set_workspace(Workspace::Network);
+    app.ui.focus = PanelId::Traffic;
+    app.ui.toggle_panel();
+    let network = screen(&app, 110, 35);
+    assert!(!network.contains("PROCESS TRAFFIC"));
+    assert!(network.contains("DOWNLOAD"));
+}
+
+#[test]
+fn every_workspace_density_and_size_renders_with_scrolled_lists() {
+    use filiz::input::list::ListState;
+    use filiz::ui::state::LayoutDensity;
+    for workspace in Workspace::ALL {
+        for density in [
+            LayoutDensity::Compact,
+            LayoutDensity::Balanced,
+            LayoutDensity::Spacious,
+        ] {
+            for (width, height) in [(110, 35), (80, 24), (48, 20), (20, 8), (10, 3)] {
+                let mut app = sample_app();
+                app.ui.set_workspace(workspace);
+                app.ui.density = density;
+                for panel in workspace.panels() {
+                    app.ui.lists.insert(
+                        *panel,
+                        ListState {
+                            selected: 500,
+                            offset: 400,
+                        },
+                    );
+                }
+                let _ = screen(&app, width, height);
+            }
+        }
+    }
+}
+
+#[test]
 fn disks_workspace_hides_system_volumes() {
     let mut app = sample_app();
     let sample = SystemSample {
