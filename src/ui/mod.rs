@@ -1,3 +1,4 @@
+pub mod format;
 pub mod state;
 pub mod theme;
 pub mod widgets;
@@ -16,7 +17,7 @@ use state::Workspace;
 pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
     frame.render_widget(
-        Block::default().style(Style::default().bg(app.ui.theme.palette().background)),
+        Block::default().style(Style::default().bg(app.ui.theme.palette().bg)),
         area,
     );
     let (header, resource, detail, footer) = match app.ui.density {

@@ -1,4 +1,4 @@
-use ratatui::style::Color;
+use ratatui::style::{Color, Modifier};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Theme {
@@ -8,17 +8,68 @@ pub enum Theme {
     Solarized,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Palette {
-    pub background: Color,
-    pub panel: Color,
+    pub bg: Color,
+    pub surface: Color,
+    pub surface_alt: Color,
     pub border: Color,
+    pub border_focus: Color,
     pub text: Color,
-    pub muted: Color,
-    pub olive: Color,
-    pub green: Color,
-    pub yellow: Color,
-    pub red: Color,
+    pub text_muted: Color,
+    pub accent: Color,
+    pub accent_fg: Color,
+    pub selection_bg: Color,
+    pub selection_fg: Color,
+    pub ok: Color,
+    pub warn: Color,
+    pub danger: Color,
+    pub info: Color,
+    pub chart_rx: Color,
+    pub chart_tx: Color,
+    pub danger_modifier: Modifier,
+}
+
+struct Base {
+    bg: (u8, u8, u8),
+    surface: (u8, u8, u8),
+    border: (u8, u8, u8),
+    text: (u8, u8, u8),
+    muted: (u8, u8, u8),
+    accent: (u8, u8, u8),
+    ok: (u8, u8, u8),
+    warn: (u8, u8, u8),
+    danger: (u8, u8, u8),
+    danger_modifier: Modifier,
+}
+
+fn rgb((r, g, b): (u8, u8, u8)) -> Color {
+    Color::Rgb(r, g, b)
+}
+
+impl Base {
+    fn palette(self) -> Palette {
+        Palette {
+            bg: rgb(self.bg),
+            surface: rgb(self.surface),
+            surface_alt: rgb(self.surface),
+            border: rgb(self.border),
+            border_focus: rgb(self.accent),
+            text: rgb(self.text),
+            text_muted: rgb(self.muted),
+            accent: rgb(self.accent),
+            accent_fg: rgb(self.bg),
+            selection_bg: rgb(self.accent),
+            selection_fg: rgb(self.bg),
+            ok: rgb(self.ok),
+            warn: rgb(self.warn),
+            danger: rgb(self.danger),
+            info: rgb(self.ok),
+            chart_rx: rgb(self.ok),
+            chart_tx: rgb(self.accent),
+            danger_modifier: self.danger_modifier,
+        }
+    }
 }
 
 impl Theme {
@@ -26,51 +77,56 @@ impl Theme {
 
     pub fn palette(self) -> Palette {
         match self {
-            Self::Forest => Palette {
-                background: Color::Rgb(9, 13, 10),
-                panel: Color::Rgb(19, 26, 20),
-                border: Color::Rgb(66, 78, 56),
-                text: Color::Rgb(232, 235, 216),
-                muted: Color::Rgb(148, 158, 135),
-                olive: Color::Rgb(164, 191, 101),
-                green: Color::Rgb(137, 207, 138),
-                yellow: Color::Rgb(235, 194, 91),
-                red: Color::Rgb(232, 117, 100),
+            Self::Forest => Base {
+                bg: (9, 13, 10),
+                surface: (19, 26, 20),
+                border: (66, 78, 56),
+                text: (232, 235, 216),
+                muted: (148, 158, 135),
+                accent: (164, 191, 101),
+                ok: (137, 207, 138),
+                warn: (235, 194, 91),
+                danger: (232, 117, 100),
+                danger_modifier: Modifier::BOLD,
             },
-            Self::Amber => Palette {
-                background: Color::Rgb(20, 16, 10),
-                panel: Color::Rgb(31, 25, 16),
-                border: Color::Rgb(92, 68, 35),
-                text: Color::Rgb(245, 232, 202),
-                muted: Color::Rgb(164, 145, 112),
-                olive: Color::Rgb(235, 181, 74),
-                green: Color::Rgb(183, 205, 119),
-                yellow: Color::Rgb(245, 194, 78),
-                red: Color::Rgb(232, 117, 84),
+            Self::Amber => Base {
+                bg: (20, 16, 10),
+                surface: (31, 25, 16),
+                border: (92, 68, 35),
+                text: (245, 232, 202),
+                muted: (164, 145, 112),
+                accent: (235, 181, 74),
+                ok: (183, 205, 119),
+                warn: (245, 194, 78),
+                danger: (232, 117, 84),
+                danger_modifier: Modifier::BOLD,
             },
-            Self::Mono => Palette {
-                background: Color::Rgb(12, 12, 12),
-                panel: Color::Rgb(25, 25, 25),
-                border: Color::Rgb(82, 82, 82),
-                text: Color::Rgb(235, 235, 235),
-                muted: Color::Rgb(158, 158, 158),
-                olive: Color::Rgb(210, 210, 210),
-                green: Color::Rgb(205, 205, 205),
-                yellow: Color::Rgb(235, 235, 235),
-                red: Color::Rgb(255, 255, 255),
+            Self::Mono => Base {
+                bg: (12, 12, 12),
+                surface: (25, 25, 25),
+                border: (82, 82, 82),
+                text: (235, 235, 235),
+                muted: (158, 158, 158),
+                accent: (210, 210, 210),
+                ok: (205, 205, 205),
+                warn: (235, 235, 235),
+                danger: (255, 255, 255),
+                danger_modifier: Modifier::BOLD.union(Modifier::REVERSED),
             },
-            Self::Solarized => Palette {
-                background: Color::Rgb(0, 43, 54),
-                panel: Color::Rgb(7, 54, 66),
-                border: Color::Rgb(42, 94, 104),
-                text: Color::Rgb(238, 232, 213),
-                muted: Color::Rgb(147, 161, 161),
-                olive: Color::Rgb(181, 137, 0),
-                green: Color::Rgb(133, 153, 0),
-                yellow: Color::Rgb(203, 75, 22),
-                red: Color::Rgb(220, 50, 47),
+            Self::Solarized => Base {
+                bg: (0, 43, 54),
+                surface: (7, 54, 66),
+                border: (42, 94, 104),
+                text: (238, 232, 213),
+                muted: (147, 161, 161),
+                accent: (181, 137, 0),
+                ok: (133, 153, 0),
+                warn: (203, 75, 22),
+                danger: (220, 50, 47),
+                danger_modifier: Modifier::BOLD,
             },
         }
+        .palette()
     }
 
     pub fn next(self) -> Self {
@@ -90,13 +146,3 @@ impl Theme {
         }
     }
 }
-
-pub const BACKGROUND: Color = Color::Rgb(9, 13, 10);
-pub const PANEL: Color = Color::Rgb(19, 26, 20);
-pub const BORDER: Color = Color::Rgb(66, 78, 56);
-pub const TEXT: Color = Color::Rgb(232, 235, 216);
-pub const MUTED: Color = Color::Rgb(148, 158, 135);
-pub const OLIVE: Color = Color::Rgb(164, 191, 101);
-pub const GREEN: Color = Color::Rgb(137, 207, 138);
-pub const YELLOW: Color = Color::Rgb(235, 194, 91);
-pub const RED: Color = Color::Rgb(232, 117, 100);

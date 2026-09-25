@@ -11,6 +11,7 @@ use crate::model::{
     ActionKind, AppMode, ConnectionSummary, NetworkSummary, ProcessInfo, SortMode, SystemSnapshot,
 };
 
+use super::format::{bytes, percent, rate, uptime as format_uptime};
 use super::state::Workspace;
 use super::theme;
 
@@ -24,9 +25,9 @@ pub fn status(frame: &mut Frame, area: Rect, app: &App) {
         "CHECK METRICS"
     };
     let health_color = if warnings == 0 {
-        palette.green
+        palette.ok
     } else {
-        palette.yellow
+        palette.warn
     };
     let uptime = snapshot
         .and_then(|snapshot| value(snapshot, "uptime"))
@@ -45,11 +46,14 @@ pub fn status(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled(
                 "  FILIZ  ",
                 Style::default()
-                    .fg(palette.background)
-                    .bg(palette.olive)
+                    .fg(palette.bg)
+                    .bg(palette.accent)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("  SYSTEM MONITOR  /  ", Style::default().fg(palette.muted)),
+            Span::styled(
+                "  SYSTEM MONITOR  /  ",
+                Style::default().fg(palette.text_muted),
+            ),
             Span::styled(
                 health,
                 Style::default()
@@ -58,15 +62,15 @@ pub fn status(frame: &mut Frame, area: Rect, app: &App) {
             ),
             Span::styled(
                 format!("  /  {}", app.ui.workspace.label()),
-                Style::default().fg(palette.olive),
+                Style::default().fg(palette.accent),
             ),
         ]),
         Line::from(vec![
-            Span::styled("  UPTIME ", Style::default().fg(palette.muted)),
+            Span::styled("  UPTIME ", Style::default().fg(palette.text_muted)),
             Span::styled(uptime, Style::default().fg(palette.text)),
-            Span::styled("   BATTERY ", Style::default().fg(palette.muted)),
+            Span::styled("   BATTERY ", Style::default().fg(palette.text_muted)),
             Span::styled(battery, Style::default().fg(palette.text)),
-            Span::styled("   TEMP ", Style::default().fg(palette.muted)),
+            Span::styled("   TEMP ", Style::default().fg(palette.text_muted)),
             Span::styled(temperature, Style::default().fg(palette.text)),
         ]),
     ];
@@ -77,11 +81,11 @@ pub fn status(frame: &mut Frame, area: Rect, app: &App) {
             .map(|(index, workspace)| {
                 let style = if *workspace == app.ui.workspace {
                     Style::default()
-                        .fg(palette.background)
-                        .bg(palette.olive)
+                        .fg(palette.bg)
+                        .bg(palette.accent)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(palette.muted)
+                    Style::default().fg(palette.text_muted)
                 };
                 Span::styled(format!("  {} {}  ", index + 1, workspace.label()), style)
             })
@@ -89,7 +93,7 @@ pub fn status(frame: &mut Frame, area: Rect, app: &App) {
         lines.push(Line::from(tabs));
     }
     frame.render_widget(
-        Paragraph::new(lines).style(Style::default().bg(palette.panel)),
+        Paragraph::new(lines).style(Style::default().bg(palette.surface)),
         area,
     );
 }
@@ -169,7 +173,7 @@ fn resource_card(
         return;
     }
     let border = if focused {
-        palette.olive
+        palette.accent
     } else {
         palette.border
     };
@@ -178,10 +182,10 @@ fn resource_card(
         .title(format!(" {title} "))
         .title_style(
             Style::default()
-                .fg(palette.muted)
+                .fg(palette.text_muted)
                 .add_modifier(Modifier::BOLD),
         )
-        .style(Style::default().bg(palette.panel).fg(palette.text))
+        .style(Style::default().bg(palette.surface).fg(palette.text))
         .border_style(Style::default().fg(border));
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -190,12 +194,12 @@ fn resource_card(
     }
     let color = usage
         .map(|value| usage_color(value, palette))
-        .unwrap_or(palette.olive);
+        .unwrap_or(palette.accent);
     frame.render_widget(
         Paragraph::new(main.to_owned()).style(
             Style::default()
                 .fg(color)
-                .bg(palette.panel)
+                .bg(palette.surface)
                 .add_modifier(Modifier::BOLD),
         ),
         Rect { height: 1, ..inner },
@@ -203,7 +207,7 @@ fn resource_card(
     if inner.height > 1 {
         frame.render_widget(
             Paragraph::new(secondary.to_owned())
-                .style(Style::default().fg(palette.muted).bg(palette.panel)),
+                .style(Style::default().fg(palette.text_muted).bg(palette.surface)),
             Rect {
                 y: inner.y + 1,
                 height: 1,
@@ -225,7 +229,7 @@ fn resource_card(
                 } else {
                     history.iter().copied().max().unwrap_or(1).max(1)
                 })
-                .style(Style::default().fg(color).bg(palette.panel)),
+                .style(Style::default().fg(color).bg(palette.surface)),
             spark_area,
         );
     }
@@ -247,12 +251,12 @@ pub fn processes(frame: &mut Frame, area: Rect, app: &App) {
         .title(title)
         .title_style(
             Style::default()
-                .fg(palette.olive)
+                .fg(palette.accent)
                 .add_modifier(Modifier::BOLD),
         )
-        .style(Style::default().bg(palette.panel))
+        .style(Style::default().bg(palette.surface))
         .border_style(Style::default().fg(if app.focus == Panel::Processes {
-            palette.olive
+            palette.accent
         } else {
             palette.border
         }));
@@ -268,7 +272,7 @@ pub fn processes(frame: &mut Frame, area: Rect, app: &App) {
     }
     .style(
         Style::default()
-            .fg(palette.muted)
+            .fg(palette.text_muted)
             .add_modifier(Modifier::BOLD),
     );
     let rows: Vec<Row> = if processes.is_empty() {
@@ -304,8 +308,8 @@ pub fn processes(frame: &mut Frame, area: Rect, app: &App) {
         .block(block)
         .row_highlight_style(
             Style::default()
-                .fg(palette.background)
-                .bg(palette.olive)
+                .fg(palette.bg)
+                .bg(palette.accent)
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol("▸ ")
@@ -357,7 +361,7 @@ pub fn network(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             Some(download)
         }),
-        palette.green,
+        palette.ok,
         &app.histories[3],
         &palette,
     );
@@ -370,7 +374,7 @@ pub fn network(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             Some(upload)
         }),
-        palette.olive,
+        palette.accent,
         &app.histories[3],
         &palette,
     );
@@ -392,7 +396,7 @@ pub fn network(frame: &mut Frame, area: Rect, app: &App) {
     .header(
         Row::new(["INTERFACE", "DOWN", "UP", "TOTAL", "PEAK"]).style(
             Style::default()
-                .fg(palette.muted)
+                .fg(palette.text_muted)
                 .add_modifier(Modifier::BOLD),
         ),
     )
@@ -405,9 +409,9 @@ pub fn network(frame: &mut Frame, area: Rect, app: &App) {
                     .map(|item| item.interface.as_str())
                     .unwrap_or("N/A")
             ))
-            .title_style(Style::default().fg(palette.olive))
+            .title_style(Style::default().fg(palette.accent))
             .border_style(Style::default().fg(palette.border))
-            .style(Style::default().bg(palette.panel)),
+            .style(Style::default().bg(palette.surface)),
     )
     .style(Style::default().fg(palette.text))
     .column_spacing(1);
@@ -442,7 +446,7 @@ pub fn network(frame: &mut Frame, area: Rect, app: &App) {
     .header(
         Row::new(["PROCESS", "REMOTE", "TYPE", "TRAFFIC"]).style(
             Style::default()
-                .fg(palette.muted)
+                .fg(palette.text_muted)
                 .add_modifier(Modifier::BOLD),
         ),
     )
@@ -450,9 +454,9 @@ pub fn network(frame: &mut Frame, area: Rect, app: &App) {
         Block::default()
             .borders(Borders::ALL)
             .title(format!(" CONNECTIONS ({}) ", connections.len()))
-            .title_style(Style::default().fg(palette.olive))
+            .title_style(Style::default().fg(palette.accent))
             .border_style(Style::default().fg(palette.border))
-            .style(Style::default().bg(palette.panel)),
+            .style(Style::default().bg(palette.surface)),
     )
     .style(Style::default().fg(palette.text));
     frame.render_widget(connection_table, sections[2]);
@@ -529,7 +533,7 @@ pub fn disks(frame: &mut Frame, area: Rect, app: &App) {
     .header(
         Row::new(["MOUNT", "USAGE", "USED", "FREE", "TOTAL", "READ", "WRITE"]).style(
             Style::default()
-                .fg(palette.muted)
+                .fg(palette.text_muted)
                 .add_modifier(Modifier::BOLD),
         ),
     )
@@ -537,9 +541,9 @@ pub fn disks(frame: &mut Frame, area: Rect, app: &App) {
         Block::default()
             .borders(Borders::ALL)
             .title(" DISKS ")
-            .title_style(Style::default().fg(palette.olive))
+            .title_style(Style::default().fg(palette.accent))
             .border_style(Style::default().fg(palette.border))
-            .style(Style::default().bg(palette.panel)),
+            .style(Style::default().bg(palette.surface)),
     )
     .style(Style::default().fg(palette.text));
     frame.render_widget(table, area);
@@ -566,7 +570,7 @@ pub fn more(frame: &mut Frame, area: Rect, app: &App) {
         Line::from(Span::styled(
             "  FILIZ CONTROL CENTER",
             Style::default()
-                .fg(palette.olive)
+                .fg(palette.accent)
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
@@ -577,7 +581,7 @@ pub fn more(frame: &mut Frame, area: Rect, app: &App) {
         Line::from(""),
         Line::from(Span::styled(
             "  for betül, with love ♡",
-            Style::default().fg(palette.yellow),
+            Style::default().fg(palette.warn),
         )),
     ];
     if app.ui.menu_open {
@@ -585,9 +589,7 @@ pub fn more(frame: &mut Frame, area: Rect, app: &App) {
             Line::from(""),
             Line::from(Span::styled(
                 "  MENU OPEN  [L] density  [T] theme  [M] close",
-                Style::default()
-                    .fg(palette.green)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(palette.ok).add_modifier(Modifier::BOLD),
             )),
             Line::from("  Layout: compact / balanced / spacious"),
             Line::from("  Theme: Forest / Amber / Mono / Solarized"),
@@ -596,9 +598,9 @@ pub fn more(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" MORE / SETTINGS ")
-        .title_style(Style::default().fg(palette.olive))
+        .title_style(Style::default().fg(palette.accent))
         .border_style(Style::default().fg(palette.border))
-        .style(Style::default().bg(palette.panel));
+        .style(Style::default().bg(palette.surface));
     frame.render_widget(
         Paragraph::new(lines)
             .block(block)
@@ -621,18 +623,18 @@ fn network_card(
         .title(format!(" {title} "))
         .title_style(
             Style::default()
-                .fg(palette.muted)
+                .fg(palette.text_muted)
                 .add_modifier(Modifier::BOLD),
         )
         .border_style(Style::default().fg(palette.border))
-        .style(Style::default().bg(palette.panel));
+        .style(Style::default().bg(palette.surface));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     frame.render_widget(
         Paragraph::new(main).style(
             Style::default()
                 .fg(color)
-                .bg(palette.panel)
+                .bg(palette.surface)
                 .add_modifier(Modifier::BOLD),
         ),
         inner,
@@ -642,7 +644,7 @@ fn network_card(
             Sparkline::default()
                 .data(history)
                 .max(history.iter().copied().max().unwrap_or(1).max(1))
-                .style(Style::default().fg(color).bg(palette.panel)),
+                .style(Style::default().fg(color).bg(palette.surface)),
             Rect {
                 y: inner.y + 1,
                 height: inner.height - 1,
@@ -723,21 +725,21 @@ pub fn details(frame: &mut Frame, area: Rect, app: &App) {
         lines.push(Line::from(Span::styled(
             format!(" EVENT  {notice}"),
             Style::default()
-                .fg(palette.yellow)
+                .fg(palette.warn)
                 .add_modifier(Modifier::BOLD),
         )));
     } else if let Some(warning) = warning {
         lines.push(Line::from(Span::styled(
             format!(" WARNING  {}: {}", warning.collector, warning.message),
             Style::default()
-                .fg(palette.yellow)
+                .fg(palette.warn)
                 .add_modifier(Modifier::BOLD),
         )));
     }
     if let Some(process) = selected {
         lines.extend([
             Line::from(vec![
-                Span::styled(" PROCESS  ", Style::default().fg(palette.muted)),
+                Span::styled(" PROCESS  ", Style::default().fg(palette.text_muted)),
                 Span::styled(
                     process.name,
                     Style::default()
@@ -746,17 +748,17 @@ pub fn details(frame: &mut Frame, area: Rect, app: &App) {
                 ),
                 Span::styled(
                     format!("  PID {}", process.identity.pid),
-                    Style::default().fg(palette.olive),
+                    Style::default().fg(palette.accent),
                 ),
             ]),
             Line::from(vec![
-                Span::styled(" COMMAND  ", Style::default().fg(palette.muted)),
+                Span::styled(" COMMAND  ", Style::default().fg(palette.text_muted)),
                 Span::styled(process.command, Style::default().fg(palette.text)),
             ]),
             Line::from(vec![
-                Span::styled(" USER  ", Style::default().fg(palette.muted)),
+                Span::styled(" USER  ", Style::default().fg(palette.text_muted)),
                 Span::raw(process.user.unwrap_or_else(|| "N/A".into())),
-                Span::styled("   STATE  ", Style::default().fg(palette.muted)),
+                Span::styled("   STATE  ", Style::default().fg(palette.text_muted)),
                 Span::raw(process.status.unwrap_or_else(|| "N/A".into())),
             ]),
         ]);
@@ -766,13 +768,13 @@ pub fn details(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" DETAILS / EVENTS ")
-        .title_style(Style::default().fg(palette.olive))
+        .title_style(Style::default().fg(palette.accent))
         .border_style(Style::default().fg(if app.focus == Panel::Details {
-            palette.olive
+            palette.accent
         } else {
             palette.border
         }))
-        .style(Style::default().bg(palette.panel).fg(palette.text));
+        .style(Style::default().bg(palette.surface).fg(palette.text));
     frame.render_widget(
         Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
         area,
@@ -788,7 +790,7 @@ pub fn footer(frame: &mut Frame, area: Rect, app: &App) {
         vec![Line::from(vec![
             Span::styled(
                 " FILTER  ",
-                Style::default().fg(palette.background).bg(palette.olive),
+                Style::default().fg(palette.bg).bg(palette.accent),
             ),
             Span::styled(
                 format!(" {}_", app.filter),
@@ -796,63 +798,63 @@ pub fn footer(frame: &mut Frame, area: Rect, app: &App) {
             ),
             Span::styled(
                 "   ENTER DONE  ESC CLOSE",
-                Style::default().fg(palette.muted),
+                Style::default().fg(palette.text_muted),
             ),
         ])]
     } else if area.width < 42 {
         vec![Line::from(vec![
-            Span::styled("  Q ", Style::default().fg(palette.olive)),
-            Span::styled("QUIT   ", Style::default().fg(palette.muted)),
-            Span::styled("F ", Style::default().fg(palette.olive)),
-            Span::styled("FILTER   ", Style::default().fg(palette.muted)),
-            Span::styled("K ", Style::default().fg(palette.yellow)),
-            Span::styled("ACTION", Style::default().fg(palette.muted)),
+            Span::styled("  Q ", Style::default().fg(palette.accent)),
+            Span::styled("QUIT   ", Style::default().fg(palette.text_muted)),
+            Span::styled("F ", Style::default().fg(palette.accent)),
+            Span::styled("FILTER   ", Style::default().fg(palette.text_muted)),
+            Span::styled("K ", Style::default().fg(palette.warn)),
+            Span::styled("ACTION", Style::default().fg(palette.text_muted)),
         ])]
     } else if area.width < 100 {
         vec![
             Line::from(vec![
-                Span::styled("  ↑↓ ", Style::default().fg(palette.olive)),
-                Span::styled("SELECT  ", Style::default().fg(palette.muted)),
-                Span::styled("ENTER ", Style::default().fg(palette.olive)),
-                Span::styled("DETAIL  ", Style::default().fg(palette.muted)),
-                Span::styled("F ", Style::default().fg(palette.olive)),
-                Span::styled("FILTER  ", Style::default().fg(palette.muted)),
-                Span::styled("Q ", Style::default().fg(palette.olive)),
-                Span::styled("QUIT", Style::default().fg(palette.muted)),
+                Span::styled("  ↑↓ ", Style::default().fg(palette.accent)),
+                Span::styled("SELECT  ", Style::default().fg(palette.text_muted)),
+                Span::styled("ENTER ", Style::default().fg(palette.accent)),
+                Span::styled("DETAIL  ", Style::default().fg(palette.text_muted)),
+                Span::styled("F ", Style::default().fg(palette.accent)),
+                Span::styled("FILTER  ", Style::default().fg(palette.text_muted)),
+                Span::styled("Q ", Style::default().fg(palette.accent)),
+                Span::styled("QUIT", Style::default().fg(palette.text_muted)),
             ]),
             Line::from(vec![
-                Span::styled("  TAB ", Style::default().fg(palette.olive)),
-                Span::styled("PANEL  ", Style::default().fg(palette.muted)),
-                Span::styled("C/M ", Style::default().fg(palette.olive)),
-                Span::styled("SORT  ", Style::default().fg(palette.muted)),
-                Span::styled("K/⇧K ", Style::default().fg(palette.yellow)),
-                Span::styled("ACTION  ", Style::default().fg(palette.muted)),
-                Span::styled("R ", Style::default().fg(palette.olive)),
-                Span::styled("REFRESH", Style::default().fg(palette.muted)),
+                Span::styled("  TAB ", Style::default().fg(palette.accent)),
+                Span::styled("PANEL  ", Style::default().fg(palette.text_muted)),
+                Span::styled("C/M ", Style::default().fg(palette.accent)),
+                Span::styled("SORT  ", Style::default().fg(palette.text_muted)),
+                Span::styled("K/⇧K ", Style::default().fg(palette.warn)),
+                Span::styled("ACTION  ", Style::default().fg(palette.text_muted)),
+                Span::styled("R ", Style::default().fg(palette.accent)),
+                Span::styled("REFRESH", Style::default().fg(palette.text_muted)),
             ]),
         ]
     } else {
         vec![Line::from(vec![
-            Span::styled("  TAB ", Style::default().fg(palette.olive)),
-            Span::styled("PANEL   ", Style::default().fg(palette.muted)),
-            Span::styled("↑↓ ", Style::default().fg(palette.olive)),
-            Span::styled("SELECT   ", Style::default().fg(palette.muted)),
-            Span::styled("ENTER ", Style::default().fg(palette.olive)),
-            Span::styled("DETAIL   ", Style::default().fg(palette.muted)),
-            Span::styled("F ", Style::default().fg(palette.olive)),
-            Span::styled("FILTER   ", Style::default().fg(palette.muted)),
-            Span::styled("C/M ", Style::default().fg(palette.olive)),
-            Span::styled("SORT   ", Style::default().fg(palette.muted)),
-            Span::styled("K/⇧K ", Style::default().fg(palette.yellow)),
-            Span::styled("ACTION   ", Style::default().fg(palette.muted)),
-            Span::styled("R ", Style::default().fg(palette.olive)),
-            Span::styled("REFRESH   ", Style::default().fg(palette.muted)),
-            Span::styled("Q ", Style::default().fg(palette.olive)),
-            Span::styled("QUIT", Style::default().fg(palette.muted)),
+            Span::styled("  TAB ", Style::default().fg(palette.accent)),
+            Span::styled("PANEL   ", Style::default().fg(palette.text_muted)),
+            Span::styled("↑↓ ", Style::default().fg(palette.accent)),
+            Span::styled("SELECT   ", Style::default().fg(palette.text_muted)),
+            Span::styled("ENTER ", Style::default().fg(palette.accent)),
+            Span::styled("DETAIL   ", Style::default().fg(palette.text_muted)),
+            Span::styled("F ", Style::default().fg(palette.accent)),
+            Span::styled("FILTER   ", Style::default().fg(palette.text_muted)),
+            Span::styled("C/M ", Style::default().fg(palette.accent)),
+            Span::styled("SORT   ", Style::default().fg(palette.text_muted)),
+            Span::styled("K/⇧K ", Style::default().fg(palette.warn)),
+            Span::styled("ACTION   ", Style::default().fg(palette.text_muted)),
+            Span::styled("R ", Style::default().fg(palette.accent)),
+            Span::styled("REFRESH   ", Style::default().fg(palette.text_muted)),
+            Span::styled("Q ", Style::default().fg(palette.accent)),
+            Span::styled("QUIT", Style::default().fg(palette.text_muted)),
         ])]
     };
     frame.render_widget(
-        Paragraph::new(lines).style(Style::default().bg(palette.panel)),
+        Paragraph::new(lines).style(Style::default().bg(palette.surface)),
         area,
     );
 }
@@ -899,14 +901,14 @@ pub fn detail_modal(frame: &mut Frame, area: Rect, app: &App) {
         Line::from(""),
         Line::from(Span::styled(
             "  ESC CLOSE   K TERMINATE   SHIFT+K KILL",
-            Style::default().fg(palette.olive),
+            Style::default().fg(palette.accent),
         )),
     ];
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" PROCESS DETAIL ")
-        .border_style(Style::default().fg(palette.olive))
-        .style(Style::default().fg(palette.text).bg(palette.panel));
+        .border_style(Style::default().fg(palette.accent))
+        .style(Style::default().fg(palette.text).bg(palette.surface));
     frame.render_widget(
         Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
         popup,
@@ -943,7 +945,7 @@ pub fn confirmation_modal(frame: &mut Frame, area: Rect, app: &App) {
         Line::from(Span::styled(
             format!("{action} PROCESS?"),
             Style::default()
-                .fg(palette.red)
+                .fg(palette.danger)
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
@@ -951,7 +953,7 @@ pub fn confirmation_modal(frame: &mut Frame, area: Rect, app: &App) {
         Line::from(""),
         Line::from(Span::styled(
             "Y  CONFIRM       N / ESC  CANCEL",
-            Style::default().fg(palette.yellow),
+            Style::default().fg(palette.warn),
         )),
     ];
     let block = Block::default()
@@ -959,11 +961,11 @@ pub fn confirmation_modal(frame: &mut Frame, area: Rect, app: &App) {
         .title(" CONFIRM ACTION ")
         .title_style(
             Style::default()
-                .fg(palette.red)
+                .fg(palette.danger)
                 .add_modifier(Modifier::BOLD),
         )
-        .border_style(Style::default().fg(palette.red))
-        .style(Style::default().fg(palette.text).bg(palette.panel));
+        .border_style(Style::default().fg(palette.danger))
+        .style(Style::default().fg(palette.text).bg(palette.surface));
     frame.render_widget(
         Paragraph::new(lines)
             .block(block)
@@ -1090,44 +1092,12 @@ fn network_rates(snapshot: &SystemSnapshot) -> (Option<f64>, Option<f64>) {
     )
 }
 
-fn percent(value: Option<f64>) -> String {
-    value
-        .map(|value| format!("{value:.0}%"))
-        .unwrap_or_else(|| "N/A".into())
-}
-
-fn bytes(value: u64) -> String {
-    const UNITS: [&str; 6] = ["B", "KB", "MB", "GB", "TB", "PB"];
-    let mut value = value as f64;
-    let mut unit = 0;
-    while value >= 1024.0 && unit < UNITS.len() - 1 {
-        value /= 1024.0;
-        unit += 1;
-    }
-    format!("{value:.1}{}", UNITS[unit])
-}
-
-fn rate(value: f64) -> String {
-    format!("{}/s", bytes(value.max(0.0) as u64))
-}
-
-fn format_uptime(seconds: u64) -> String {
-    let days = seconds / 86_400;
-    let hours = seconds % 86_400 / 3_600;
-    let minutes = seconds % 3_600 / 60;
-    if days > 0 {
-        format!("{days}d {hours}h")
-    } else {
-        format!("{hours}h {minutes}m")
-    }
-}
-
 fn usage_color(value: f64, palette: &theme::Palette) -> ratatui::style::Color {
     if value >= 85.0 {
-        palette.red
+        palette.danger
     } else if value >= 70.0 {
-        palette.yellow
+        palette.warn
     } else {
-        palette.green
+        palette.ok
     }
 }
