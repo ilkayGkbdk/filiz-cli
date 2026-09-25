@@ -58,8 +58,7 @@ for alternate-screen and raw-mode input. Battery and temperature fields may
 show `N/A` when macOS does not expose them on a particular machine.
 
 The installer checks Git and Cargo, installs the latest `main` revision, and
-verifies the `filiz` command. It is intentionally transparent: the underlying
-Cargo output is retained in `/tmp/filiz-install.log` if installation fails.
+verifies the `filiz` command.
 
 ## What it shows
 
@@ -76,26 +75,27 @@ Cargo output is retained in `/tmp/filiz-install.log` if installation fails.
 
 | Key | Action |
 | --- | --- |
-| `Tab` | Change focused panel |
-| `1`–`5` | Switch Overview, Processes, Network, Disks, or More workspace |
-| `←` / `→` | Move between workspaces |
-| `H` | Hide/show the focused panel |
-| `L` | Cycle compact, balanced, and spacious layout |
-| `T` | Cycle Forest, Amber, Mono, and Solarized themes |
-| `M` | Open/close the menu state |
-| Mouse wheel | Scroll the focused panel |
-| `↑` / `↓` | Select a process |
-| `Enter` | Open process detail |
+| `1`–`5`, `←` / `→` | Switch Overview, Processes, Network, Disks, More |
+| `Tab` / `Shift+Tab` | Move focus between the panels of the current workspace |
+| `↑` / `↓`, `PageUp` / `PageDown`, `Home` / `End` | Move in the focused list |
+| `Enter` | Open process detail (process list) |
 | `F` | Filter processes |
-| `C` / `M` | Sort by CPU / memory |
+| `S` | Cycle sort: CPU → memory |
 | `K` / `Shift+K` | Request terminate / kill confirmation |
-| `Y` | Confirm a pending process action |
-| `N` / `Esc` | Cancel or close |
-| `Q` | Quit |
+| `Y` / `N` / `Esc` | Confirm / cancel a pending process action |
+| `M` | Open or close the menu |
+| `H` | Hide the focused panel; press again to restore |
+| `L` | Cycle compact, balanced and spacious layout |
+| `T` | Cycle Forest, Amber, Mono and Solarized themes |
+| `R` | Refresh now |
+| `Q` / `Ctrl+C` | Quit |
+| Mouse | Click tabs, rows and footer hints; double-click a process for detail; wheel scrolls the panel under the cursor |
 
-The Network workspace (`3`) keeps current download/upload rates visible even
-when the terminal is narrow. Mouse scrolling is enabled inside the alternate
-screen; keyboard navigation remains available as a fallback.
+The footer always lists the keys available in the current context.
+
+The Network workspace (`3`) shows download/upload rates per interface and a
+live per-process traffic list collected from `nettop`. Metrics are collected on
+background threads, so the interface stays responsive while macOS tools run.
 
 Every refresh is read-only until a process action is explicitly confirmed.
 

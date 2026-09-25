@@ -1,6 +1,7 @@
 pub mod components;
 pub mod format;
 pub mod hit;
+pub mod splash;
 pub mod state;
 pub mod theme;
 pub mod workspaces;

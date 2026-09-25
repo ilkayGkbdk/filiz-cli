@@ -252,3 +252,11 @@ fn disks_workspace_hides_system_volumes() {
     let output = screen(&app, 110, 35);
     assert!(!output.contains("/System/Volumes/VM"));
 }
+
+#[test]
+fn splash_uses_carriage_returns_in_raw_mode() {
+    let text = filiz::ui::splash::for_raw_mode("a\nb\r\nc\n");
+    assert_eq!(text, "a\r\nb\r\nc\r\n");
+    let logo = filiz::ui::splash::for_raw_mode(include_str!("../assets/logo.ansi"));
+    assert!(!logo.replace("\r\n", "").contains('\n'));
+}
