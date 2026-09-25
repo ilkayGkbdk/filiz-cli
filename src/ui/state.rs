@@ -1,9 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use crossterm::event::{KeyCode, KeyEvent, MouseEvent, MouseEventKind};
-
 use super::theme::Theme;
-use crate::app::Panel;
+use crate::input::list::ListState;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Workspace {
@@ -31,17 +29,6 @@ impl Workspace {
             Self::Disks => "Disks",
             Self::More => "More…",
         }
-    }
-
-    pub fn from_number(code: KeyCode) -> Option<Self> {
-        Some(match code {
-            KeyCode::Char('1') => Self::Overview,
-            KeyCode::Char('2') => Self::Processes,
-            KeyCode::Char('3') => Self::Network,
-            KeyCode::Char('4') => Self::Disks,
-            KeyCode::Char('5') => Self::More,
-            _ => return None,
-        })
     }
 
     pub fn step(self, direction: i8) -> Self {
@@ -104,109 +91,95 @@ impl LayoutDensity {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum UiCommand {
-    WorkspaceChanged(Workspace),
-    FocusNext,
-    TogglePanel(Panel),
-    DensityChanged(LayoutDensity),
-    Scroll(Panel, i16),
-    OpenMenu,
-    NetworkInterfaceChanged(usize),
-    Noop,
+pub enum PanelToggle {
+    Hidden(PanelId),
+    Restored,
+    LastPanel,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UiState {
     pub workspace: Workspace,
+    pub focus: PanelId,
     pub density: LayoutDensity,
-    pub hidden_panels: HashSet<Panel>,
-    pub scroll_offsets: HashMap<Panel, u16>,
+    pub hidden_panels: HashSet<PanelId>,
+    pub lists: HashMap<PanelId, ListState>,
     pub menu_open: bool,
     pub theme: Theme,
-    pub network_interface: usize,
 }
 
 impl Default for UiState {
     fn default() -> Self {
         Self {
             workspace: Workspace::Overview,
+            focus: PanelId::Processes,
             density: LayoutDensity::Balanced,
             hidden_panels: HashSet::new(),
-            scroll_offsets: HashMap::new(),
+            lists: HashMap::new(),
             menu_open: false,
             theme: Theme::Forest,
-            network_interface: 0,
         }
     }
 }
 
 impl UiState {
-    pub fn handle_key(&mut self, key: KeyEvent, focused: Panel) -> UiCommand {
-        if let Some(workspace) = Workspace::from_number(key.code) {
-            self.workspace = workspace;
-            self.menu_open = false;
-            return UiCommand::WorkspaceChanged(workspace);
-        }
+    pub fn visible_panels(&self) -> Vec<PanelId> {
+        self.workspace
+            .panels()
+            .iter()
+            .copied()
+            .filter(|panel| !self.hidden_panels.contains(panel))
+            .collect()
+    }
 
-        match key.code {
-            KeyCode::Left => {
-                self.workspace = self.workspace.step(-1);
-                UiCommand::WorkspaceChanged(self.workspace)
-            }
-            KeyCode::Right => {
-                self.workspace = self.workspace.step(1);
-                UiCommand::WorkspaceChanged(self.workspace)
-            }
-            KeyCode::Tab => UiCommand::FocusNext,
-            KeyCode::Char('h' | 'H') => {
-                if self.hidden_panels.remove(&focused) {
-                    UiCommand::TogglePanel(focused)
-                } else {
-                    self.hidden_panels.insert(focused);
-                    UiCommand::TogglePanel(focused)
-                }
-            }
-            KeyCode::Char('l' | 'L') => {
-                self.density = self.density.cycle();
-                UiCommand::DensityChanged(self.density)
-            }
-            KeyCode::Char('m' | 'M') => {
-                self.menu_open = !self.menu_open;
-                UiCommand::OpenMenu
-            }
-            KeyCode::Char('t' | 'T') => {
-                self.theme = self.theme.next();
-                UiCommand::Noop
-            }
-            KeyCode::PageUp => UiCommand::Scroll(focused, -8),
-            KeyCode::PageDown => UiCommand::Scroll(focused, 8),
-            KeyCode::Up if self.workspace == Workspace::Network => {
-                self.network_interface = self.network_interface.saturating_sub(1);
-                UiCommand::NetworkInterfaceChanged(self.network_interface)
-            }
-            KeyCode::Down if self.workspace == Workspace::Network => {
-                self.network_interface = self.network_interface.saturating_add(1);
-                UiCommand::NetworkInterfaceChanged(self.network_interface)
-            }
-            _ => UiCommand::Noop,
+    pub fn set_workspace(&mut self, workspace: Workspace) {
+        self.workspace = workspace;
+        self.menu_open = false;
+        let visible = self.visible_panels();
+        if !visible.contains(&self.focus) {
+            self.focus = visible.first().copied().unwrap_or(workspace.panels()[0]);
         }
     }
 
-    pub fn handle_mouse(&mut self, mouse: MouseEvent, focused: Panel) -> UiCommand {
-        let amount = match mouse.kind {
-            MouseEventKind::ScrollUp => -3,
-            MouseEventKind::ScrollDown => 3,
-            _ => return UiCommand::Noop,
-        };
-        UiCommand::Scroll(focused, amount)
+    pub fn focus_step(&mut self, direction: isize) {
+        let visible = self.visible_panels();
+        if visible.is_empty() {
+            return;
+        }
+        let current = visible
+            .iter()
+            .position(|panel| *panel == self.focus)
+            .unwrap_or(0) as isize;
+        let next = (current + direction).rem_euclid(visible.len() as isize) as usize;
+        self.focus = visible[next];
     }
 
-    pub fn scroll_by(&mut self, panel: Panel, amount: i16) {
-        let offset = self.scroll_offsets.entry(panel).or_default();
-        if amount.is_negative() {
-            *offset = offset.saturating_sub(amount.unsigned_abs());
-        } else {
-            *offset = offset.saturating_add(amount as u16);
+    /// `H`: restore this workspace's hidden panels, or hide the focused one.
+    pub fn toggle_panel(&mut self) -> PanelToggle {
+        let panels = self.workspace.panels();
+        if panels
+            .iter()
+            .any(|panel| self.hidden_panels.contains(panel))
+        {
+            for panel in panels {
+                self.hidden_panels.remove(panel);
+            }
+            return PanelToggle::Restored;
         }
+        if self.visible_panels().len() <= 1 {
+            return PanelToggle::LastPanel;
+        }
+        let hidden = self.focus;
+        self.hidden_panels.insert(hidden);
+        self.focus = self.visible_panels()[0];
+        PanelToggle::Hidden(hidden)
+    }
+
+    pub fn list(&self, panel: PanelId) -> ListState {
+        self.lists.get(&panel).copied().unwrap_or_default()
+    }
+
+    pub fn list_mut(&mut self, panel: PanelId) -> &mut ListState {
+        self.lists.entry(panel).or_default()
     }
 }

@@ -6,14 +6,35 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{App, Panel};
+use crate::app::App;
 use crate::history::SeriesKey;
+use crate::input::action::Action;
+use crate::input::keymap;
 use crate::model::{ActionKind, AppMode, ProcessInfo, SortMode};
 use crate::state::{DiskStats, InterfaceStats, SystemState};
 
 use super::format::{bytes, percent, rate, uptime as format_uptime};
-use super::state::Workspace;
+use super::state::{PanelId, Workspace};
 use super::theme;
+use super::RenderOutput;
+
+fn table_state(app: &App, panel: PanelId, len: usize) -> TableState {
+    let list = app.ui.list(panel);
+    let state = TableState::default().with_offset(list.offset);
+    if len == 0 {
+        state
+    } else {
+        state.with_selected(Some(list.selected))
+    }
+}
+
+fn border_for(app: &App, panel: PanelId, palette: &theme::Palette) -> Style {
+    Style::default().fg(if app.ui.focus == panel {
+        palette.border_focus
+    } else {
+        palette.border
+    })
+}
 
 pub fn status(frame: &mut Frame, area: Rect, app: &App) {
     let palette = app.ui.theme.palette();
@@ -107,7 +128,8 @@ pub fn resources(frame: &mut Frame, area: Rect, app: &App) {
     let memory = app.state.memory.usage_percent();
     let disk = app.state.primary_disk().and_then(DiskStats::usage_percent);
     let (rx, tx) = total_rates(&app.state);
-    let network_history = selected_interface(app)
+    let network_history = app
+        .selected_interface()
         .map(|i| app.history.series(&SeriesKey::NetRx(i.name.clone())))
         .unwrap_or_default();
     let cards = [
@@ -156,7 +178,7 @@ pub fn resources(frame: &mut Frame, area: Rect, app: &App) {
                 frame,
                 columns[column],
                 card,
-                app.focus == Panel::Resources,
+                app.ui.focus == PanelId::Resources,
                 &palette,
             );
         }
@@ -237,17 +259,15 @@ fn resource_card(
     }
 }
 
-pub fn processes(frame: &mut Frame, area: Rect, app: &App) {
+pub fn processes(frame: &mut Frame, area: Rect, app: &App, out: &mut RenderOutput) {
+    out.viewports
+        .insert(PanelId::Processes, area.height.saturating_sub(3) as usize);
     if area.height == 0 || area.width == 0 {
         return;
     }
     let palette = app.ui.theme.palette();
     let processes = app.visible_processes();
-    let sort = match app.sort {
-        SortMode::Cpu => "CPU",
-        SortMode::Memory => "MEM",
-    };
-    let title = format!(" PROCESSES  {}  /  SORT {sort} ", processes.len());
+    let title = format!(" PROCESSES  {} ", processes.len());
     let block = Block::default()
         .borders(Borders::ALL)
         .title(title)
@@ -257,22 +277,28 @@ pub fn processes(frame: &mut Frame, area: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD),
         )
         .style(Style::default().bg(palette.surface))
-        .border_style(Style::default().fg(if app.focus == Panel::Processes {
-            palette.accent
-        } else {
-            palette.border
-        }));
+        .border_style(border_for(app, PanelId::Processes, &palette));
     if area.height < 3 || area.width < 12 {
         frame.render_widget(block, area);
         return;
     }
     let wide = area.width >= 70;
-    let header = if wide {
-        Row::new(["PROCESS", "PID", "CPU", "MEMORY", "STATUS"])
+    let cpu_label = if app.sort == SortMode::Cpu {
+        "CPU ▼"
     } else {
-        Row::new(["PROCESS", "PID", "CPU", "MEMORY"])
-    }
-    .style(
+        "CPU"
+    };
+    let memory_label = if app.sort == SortMode::Memory {
+        "MEMORY ▼"
+    } else {
+        "MEMORY"
+    };
+    let header_cells: Vec<&str> = if wide {
+        vec!["PROCESS", "PID", cpu_label, memory_label, "STATUS"]
+    } else {
+        vec!["PROCESS", "PID", cpu_label, memory_label]
+    };
+    let header = Row::new(header_cells).style(
         Style::default()
             .fg(palette.text_muted)
             .add_modifier(Modifier::BOLD),
@@ -310,25 +336,21 @@ pub fn processes(frame: &mut Frame, area: Rect, app: &App) {
         .block(block)
         .row_highlight_style(
             Style::default()
-                .fg(palette.bg)
-                .bg(palette.accent)
-                .add_modifier(Modifier::BOLD),
+                .fg(palette.selection_fg)
+                .bg(palette.selection_bg),
         )
         .highlight_symbol("▸ ")
         .column_spacing(1);
-    let mut state = TableState::default();
-    if !processes.is_empty() {
-        state.select(Some(app.selected_index));
-    }
+    let mut state = table_state(app, PanelId::Processes, processes.len());
     frame.render_stateful_widget(table, area, &mut state);
 }
 
-pub fn network(frame: &mut Frame, area: Rect, app: &App) {
+pub fn network(frame: &mut Frame, area: Rect, app: &App, out: &mut RenderOutput) {
     if area.height == 0 || area.width == 0 {
         return;
     }
     let palette = app.ui.theme.palette();
-    let selected = selected_interface(app);
+    let selected = app.selected_interface();
     let sections = Layout::vertical([
         Constraint::Length(6),
         Constraint::Length(7),
@@ -367,7 +389,7 @@ pub fn network(frame: &mut Frame, area: Rect, app: &App) {
         .iter()
         .map(network_row)
         .collect::<Vec<_>>();
-    let table = Table::new(
+    let interfaces_table = Table::new(
         if rows.is_empty() {
             vec![Row::new(["No network interfaces", "", "", "", ""])]
         } else {
@@ -396,39 +418,34 @@ pub fn network(frame: &mut Frame, area: Rect, app: &App) {
                 selected.map(|item| item.name.as_str()).unwrap_or("N/A")
             ))
             .title_style(Style::default().fg(palette.accent))
-            .border_style(Style::default().fg(palette.border))
+            .border_style(border_for(app, PanelId::Interfaces, &palette))
             .style(Style::default().bg(palette.surface)),
     )
     .style(Style::default().fg(palette.text))
+    .row_highlight_style(
+        Style::default()
+            .fg(palette.selection_fg)
+            .bg(palette.selection_bg),
+    )
+    .highlight_symbol("▸ ")
     .column_spacing(1);
-    frame.render_widget(table, sections[1]);
+    frame.render_stateful_widget(
+        interfaces_table,
+        sections[1],
+        &mut table_state(app, PanelId::Interfaces, app.state.interfaces.len()),
+    );
+    out.viewports.insert(
+        PanelId::Interfaces,
+        sections[1].height.saturating_sub(3) as usize,
+    );
 
-    let mut talkers: Vec<&ProcessInfo> = app
-        .state
-        .processes
-        .iter()
-        .filter(|process| process.traffic.is_some())
-        .collect();
-    talkers.sort_by(|a, b| {
-        let total = |p: &ProcessInfo| p.traffic.map_or(0.0, |t| t.rx + t.tx);
-        total(b).total_cmp(&total(a))
-    });
-    let offset = app
-        .ui
-        .scroll_offsets
-        .get(&Panel::Network)
-        .copied()
-        .unwrap_or(0) as usize;
+    let talkers = app.traffic_rows();
     let empty = if app.state.issue(crate::state::Source::Traffic).is_some() {
         "Traffic unavailable"
     } else {
         "No process traffic yet"
     };
-    let rows: Vec<Row> = talkers
-        .iter()
-        .skip(offset.min(talkers.len()))
-        .map(|process| traffic_row(process))
-        .collect();
+    let rows: Vec<Row> = talkers.iter().map(|p| traffic_row(p)).collect();
     let traffic_table = Table::new(
         if rows.is_empty() {
             vec![Row::new([empty, "", "", ""])]
@@ -454,24 +471,36 @@ pub fn network(frame: &mut Frame, area: Rect, app: &App) {
             .borders(Borders::ALL)
             .title(format!(" PROCESS TRAFFIC ({}) ", talkers.len()))
             .title_style(Style::default().fg(palette.accent))
-            .border_style(Style::default().fg(palette.border))
+            .border_style(border_for(app, PanelId::Traffic, &palette))
             .style(Style::default().bg(palette.surface)),
     )
-    .style(Style::default().fg(palette.text));
-    frame.render_widget(traffic_table, sections[2]);
+    .style(Style::default().fg(palette.text))
+    .row_highlight_style(
+        Style::default()
+            .fg(palette.selection_fg)
+            .bg(palette.selection_bg),
+    )
+    .highlight_symbol("▸ ");
+    frame.render_stateful_widget(
+        traffic_table,
+        sections[2],
+        &mut table_state(app, PanelId::Traffic, talkers.len()),
+    );
+    out.viewports.insert(
+        PanelId::Traffic,
+        sections[2].height.saturating_sub(3) as usize,
+    );
 }
 
-pub fn disks(frame: &mut Frame, area: Rect, app: &App) {
+pub fn disks(frame: &mut Frame, area: Rect, app: &App, out: &mut RenderOutput) {
+    out.viewports
+        .insert(PanelId::Disks, area.height.saturating_sub(3) as usize);
     if area.height == 0 || area.width == 0 {
         return;
     }
     let palette = app.ui.theme.palette();
-    let rows = app
-        .state
-        .visible_disks()
-        .into_iter()
-        .map(disk_row)
-        .collect::<Vec<_>>();
+    let disks = app.state.visible_disks();
+    let rows = disks.iter().map(|disk| disk_row(disk)).collect::<Vec<_>>();
     let table = Table::new(
         if rows.is_empty() {
             vec![Row::new(["No disks", "", "", "", ""])]
@@ -498,11 +527,21 @@ pub fn disks(frame: &mut Frame, area: Rect, app: &App) {
             .borders(Borders::ALL)
             .title(" DISKS ")
             .title_style(Style::default().fg(palette.accent))
-            .border_style(Style::default().fg(palette.border))
+            .border_style(border_for(app, PanelId::Disks, &palette))
             .style(Style::default().bg(palette.surface)),
     )
-    .style(Style::default().fg(palette.text));
-    frame.render_widget(table, area);
+    .style(Style::default().fg(palette.text))
+    .row_highlight_style(
+        Style::default()
+            .fg(palette.selection_fg)
+            .bg(palette.selection_bg),
+    )
+    .highlight_symbol("▸ ");
+    frame.render_stateful_widget(
+        table,
+        area,
+        &mut table_state(app, PanelId::Disks, disks.len()),
+    );
 }
 
 pub fn more(frame: &mut Frame, area: Rect, app: &App) {
@@ -544,7 +583,7 @@ pub fn more(frame: &mut Frame, area: Rect, app: &App) {
         lines.extend([
             Line::from(""),
             Line::from(Span::styled(
-                "  MENU OPEN  [L] density  [T] theme  [M] close",
+                "  MENU OPEN  [L] density  [T] theme  [Esc] close",
                 Style::default().fg(palette.ok).add_modifier(Modifier::BOLD),
             )),
             Line::from("  Layout: compact / balanced / spacious"),
@@ -689,11 +728,7 @@ pub fn details(frame: &mut Frame, area: Rect, app: &App) {
         .borders(Borders::ALL)
         .title(" DETAILS / EVENTS ")
         .title_style(Style::default().fg(palette.accent))
-        .border_style(Style::default().fg(if app.focus == Panel::Details {
-            palette.accent
-        } else {
-            palette.border
-        }))
+        .border_style(border_for(app, PanelId::Details, &palette))
         .style(Style::default().bg(palette.surface).fg(palette.text));
     frame.render_widget(
         Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
@@ -706,73 +741,45 @@ pub fn footer(frame: &mut Frame, area: Rect, app: &App) {
         return;
     }
     let palette = app.ui.theme.palette();
-    let lines = if app.mode == AppMode::Filtering {
-        vec![Line::from(vec![
-            Span::styled(
-                " FILTER  ",
-                Style::default().fg(palette.bg).bg(palette.accent),
-            ),
-            Span::styled(
-                format!(" {}_", app.filter),
-                Style::default().fg(palette.text),
-            ),
-            Span::styled(
-                "   ENTER DONE  ESC CLOSE",
-                Style::default().fg(palette.text_muted),
-            ),
-        ])]
-    } else if area.width < 42 {
-        vec![Line::from(vec![
-            Span::styled("  Q ", Style::default().fg(palette.accent)),
-            Span::styled("QUIT   ", Style::default().fg(palette.text_muted)),
-            Span::styled("F ", Style::default().fg(palette.accent)),
-            Span::styled("FILTER   ", Style::default().fg(palette.text_muted)),
-            Span::styled("K ", Style::default().fg(palette.warn)),
-            Span::styled("ACTION", Style::default().fg(palette.text_muted)),
-        ])]
-    } else if area.width < 100 {
-        vec![
-            Line::from(vec![
-                Span::styled("  ↑↓ ", Style::default().fg(palette.accent)),
-                Span::styled("SELECT  ", Style::default().fg(palette.text_muted)),
-                Span::styled("ENTER ", Style::default().fg(palette.accent)),
-                Span::styled("DETAIL  ", Style::default().fg(palette.text_muted)),
-                Span::styled("F ", Style::default().fg(palette.accent)),
-                Span::styled("FILTER  ", Style::default().fg(palette.text_muted)),
-                Span::styled("Q ", Style::default().fg(palette.accent)),
-                Span::styled("QUIT", Style::default().fg(palette.text_muted)),
-            ]),
-            Line::from(vec![
-                Span::styled("  TAB ", Style::default().fg(palette.accent)),
-                Span::styled("PANEL  ", Style::default().fg(palette.text_muted)),
-                Span::styled("C/M ", Style::default().fg(palette.accent)),
-                Span::styled("SORT  ", Style::default().fg(palette.text_muted)),
-                Span::styled("K/⇧K ", Style::default().fg(palette.warn)),
-                Span::styled("ACTION  ", Style::default().fg(palette.text_muted)),
-                Span::styled("R ", Style::default().fg(palette.accent)),
-                Span::styled("REFRESH", Style::default().fg(palette.text_muted)),
-            ]),
-        ]
-    } else {
-        vec![Line::from(vec![
-            Span::styled("  TAB ", Style::default().fg(palette.accent)),
-            Span::styled("PANEL   ", Style::default().fg(palette.text_muted)),
-            Span::styled("↑↓ ", Style::default().fg(palette.accent)),
-            Span::styled("SELECT   ", Style::default().fg(palette.text_muted)),
-            Span::styled("ENTER ", Style::default().fg(palette.accent)),
-            Span::styled("DETAIL   ", Style::default().fg(palette.text_muted)),
-            Span::styled("F ", Style::default().fg(palette.accent)),
-            Span::styled("FILTER   ", Style::default().fg(palette.text_muted)),
-            Span::styled("C/M ", Style::default().fg(palette.accent)),
-            Span::styled("SORT   ", Style::default().fg(palette.text_muted)),
-            Span::styled("K/⇧K ", Style::default().fg(palette.warn)),
-            Span::styled("ACTION   ", Style::default().fg(palette.text_muted)),
-            Span::styled("R ", Style::default().fg(palette.accent)),
-            Span::styled("REFRESH   ", Style::default().fg(palette.text_muted)),
-            Span::styled("Q ", Style::default().fg(palette.accent)),
-            Span::styled("QUIT", Style::default().fg(palette.text_muted)),
-        ])]
-    };
+    let max_width = area.width as usize;
+    let mut lines: Vec<Vec<Span>> = vec![Vec::new()];
+    let mut width = 0;
+    if app.mode == AppMode::Filtering {
+        let prompt = format!(" {}_  ", app.filter);
+        width = 8 + prompt.chars().count();
+        lines[0].push(Span::styled(
+            " FILTER ",
+            Style::default().fg(palette.accent_fg).bg(palette.accent),
+        ));
+        lines[0].push(Span::styled(prompt, Style::default().fg(palette.text)));
+    }
+    for binding in keymap::hints(&app.contexts()) {
+        let hint = binding.hint.unwrap_or_default();
+        let needed = binding.label.chars().count() + hint.chars().count() + 4;
+        if width + needed > max_width {
+            if lines.len() == area.height as usize {
+                break;
+            }
+            lines.push(Vec::new());
+            width = 0;
+        }
+        width += needed;
+        let key_color = if matches!(binding.action, Action::Terminate | Action::Kill) {
+            palette.warn
+        } else {
+            palette.accent
+        };
+        let line = lines.last_mut().expect("footer line");
+        line.push(Span::styled(
+            format!("  {} ", binding.label),
+            Style::default().fg(key_color).add_modifier(Modifier::BOLD),
+        ));
+        line.push(Span::styled(
+            format!("{hint} "),
+            Style::default().fg(palette.text_muted),
+        ));
+    }
+    let lines: Vec<Line> = lines.into_iter().map(Line::from).collect();
     frame.render_widget(
         Paragraph::new(lines).style(Style::default().bg(palette.surface)),
         area,
@@ -957,15 +964,6 @@ fn total_rates(state: &SystemState) -> (Option<f64>, Option<f64>) {
         (!values.is_empty()).then(|| values.iter().sum())
     };
     (sum(|i| i.rx_rate), sum(|i| i.tx_rate))
-}
-
-fn selected_interface(app: &App) -> Option<&InterfaceStats> {
-    let interfaces = &app.state.interfaces;
-    interfaces.get(
-        app.ui
-            .network_interface
-            .min(interfaces.len().saturating_sub(1)),
-    )
 }
 
 fn network_row(interface: &InterfaceStats) -> Row<'static> {

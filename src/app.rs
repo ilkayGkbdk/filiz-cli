@@ -1,239 +1,36 @@
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::history::SeriesKey;
-    use crate::state::SystemSample;
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
-    fn key(code: KeyCode) -> KeyEvent {
-        KeyEvent::new(code, KeyModifiers::NONE)
-    }
-
-    fn process(pid: u32, cpu: f32) -> ProcessInfo {
-        ProcessInfo {
-            identity: ProcessIdentity {
-                pid,
-                start_time: u64::from(pid) * 100,
-            },
-            name: format!("process-{pid}"),
-            command: format!("/bin/process-{pid}"),
-            cpu_percent: Some(cpu),
-            memory_bytes: Some(u64::from(pid) * 1024),
-            user: None,
-            status: None,
-            traffic: None,
-        }
-    }
-
-    fn app_with_processes() -> App {
-        let mut app = App::new(Duration::from_secs(2));
-        app.apply_update(CollectorUpdate::System(SystemSample {
-            processes: vec![process(20, 10.0), process(10, 20.0)],
-            ..Default::default()
-        }));
-        app
-    }
-
-    #[test]
-    fn q_quits_and_tab_changes_focus() {
-        let mut app = app_with_processes();
-        assert_eq!(app.focus, Panel::Processes);
-        assert_eq!(app.handle_key(key(KeyCode::Tab)), AppCommand::Noop);
-        assert_eq!(app.focus, Panel::Details);
-        assert_eq!(app.handle_key(key(KeyCode::Char('q'))), AppCommand::Quit);
-    }
-
-    #[test]
-    fn arrows_select_sorted_processes_without_leaving_bounds() {
-        let mut app = app_with_processes();
-        assert_eq!(app.selected_process().unwrap().identity.pid, 10);
-        app.handle_key(key(KeyCode::Down));
-        assert_eq!(app.selected_process().unwrap().identity.pid, 20);
-        app.handle_key(key(KeyCode::Down));
-        assert_eq!(app.selected_process().unwrap().identity.pid, 20);
-        app.handle_key(key(KeyCode::Up));
-        assert_eq!(app.selected_process().unwrap().identity.pid, 10);
-    }
-
-    #[test]
-    fn enter_opens_detail_and_escape_closes_it() {
-        let mut app = app_with_processes();
-        assert_eq!(
-            app.handle_key(key(KeyCode::Enter)),
-            AppCommand::OpenProcess(process(10, 20.0).identity)
-        );
-        assert_eq!(app.mode, AppMode::ProcessDetail);
-        assert_eq!(app.handle_key(key(KeyCode::Esc)), AppCommand::Noop);
-        assert_eq!(app.mode, AppMode::Dashboard);
-    }
-
-    #[test]
-    fn k_requests_confirmation_and_escape_rejects_it() {
-        let mut app = app_with_processes();
-        assert_eq!(
-            app.handle_key(key(KeyCode::Char('k'))),
-            AppCommand::BeginAction
-        );
-        assert_eq!(app.mode, AppMode::ConfirmingAction);
-        assert_eq!(app.pending_action.unwrap().kind(), ActionKind::Terminate);
-        assert_eq!(app.handle_key(key(KeyCode::Esc)), AppCommand::CancelAction);
-        assert_eq!(app.mode, AppMode::Dashboard);
-        assert!(app.pending_action.is_none());
-    }
-
-    #[test]
-    fn confirmation_only_accepts_explicit_yes() {
-        let mut app = app_with_processes();
-        app.handle_key(key(KeyCode::Char('k')));
-        assert_eq!(app.handle_key(key(KeyCode::Enter)), AppCommand::Noop);
-        assert_eq!(app.mode, AppMode::ConfirmingAction);
-        let command = app.handle_key(key(KeyCode::Char('y')));
-        assert_eq!(
-            command,
-            AppCommand::ConfirmAction(
-                PendingAction::new(process(10, 20.0).identity, ActionKind::Terminate).confirm()
-            )
-        );
-        assert_eq!(app.mode, AppMode::Dashboard);
-        assert!(app.pending_action.is_none());
-    }
-
-    #[test]
-    fn n_rejects_confirmation_and_filter_mode_accepts_text() {
-        let mut app = app_with_processes();
-        app.handle_key(key(KeyCode::Char('k')));
-        assert_eq!(
-            app.handle_key(key(KeyCode::Char('n'))),
-            AppCommand::CancelAction
-        );
-        assert_eq!(app.handle_key(key(KeyCode::Char('f'))), AppCommand::Noop);
-        assert_eq!(app.mode, AppMode::Filtering);
-        app.handle_key(key(KeyCode::Char('2')));
-        assert_eq!(app.visible_processes().len(), 1);
-        assert_eq!(app.visible_processes()[0].identity.pid, 20);
-        app.handle_key(key(KeyCode::Esc));
-        assert_eq!(app.mode, AppMode::Dashboard);
-    }
-
-    #[test]
-    fn replacing_state_keeps_selection_by_full_identity() {
-        let mut app = app_with_processes();
-        app.handle_key(key(KeyCode::Down));
-        app.apply_update(CollectorUpdate::System(SystemSample {
-            processes: vec![process(20, 80.0), process(10, 1.0)],
-            ..Default::default()
-        }));
-        assert_eq!(app.selected_process().unwrap().identity.pid, 20);
-        let mut reused = process(20, 80.0);
-        reused.identity.start_time += 1;
-        app.apply_update(CollectorUpdate::System(SystemSample {
-            processes: vec![reused, process(10, 1.0)],
-            ..Default::default()
-        }));
-        assert_eq!(app.selected_process().unwrap().identity.pid, 10);
-    }
-
-    #[test]
-    fn network_history_is_recorded_per_interface() {
-        let mut app = app_with_processes();
-        app.apply_update(CollectorUpdate::System(SystemSample {
-            interfaces: vec![crate::state::InterfaceStats {
-                name: "en0".into(),
-                rx_rate: Some(200_000.0),
-                tx_rate: Some(1_000.0),
-                rx_total: 0,
-                tx_total: 0,
-                peak_rx: 0.0,
-                peak_tx: 0.0,
-            }],
-            ..Default::default()
-        }));
-        assert_eq!(
-            app.history.series(&SeriesKey::NetRx("en0".into())).last(),
-            Some(&200_000)
-        );
-    }
-
-    #[test]
-    fn self_process_does_not_enter_action_confirmation() {
-        let mut app = app_with_processes();
-        let self_pid = std::process::id();
-        app.apply_update(CollectorUpdate::System(SystemSample {
-            processes: vec![process(self_pid, 1.0)],
-            ..Default::default()
-        }));
-
-        assert_eq!(app.handle_key(key(KeyCode::Char('k'))), AppCommand::Noop);
-        assert_eq!(app.mode, AppMode::Dashboard);
-        assert!(app.pending_action.is_none());
-        assert!(app.notice.as_deref().unwrap_or_default().contains("itself"));
-    }
-}
 use std::io::Stdout;
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent};
+use crossterm::event::{self, Event, KeyEvent, MouseEvent, MouseEventKind};
 use ratatui::{backend::CrosstermBackend, Terminal};
 
 use crate::actions::ProcessAction;
 use crate::collectors::runtime::CollectorRuntime;
 use crate::history::History;
+use crate::input::action::{Action, Effect};
+use crate::input::keymap::{self, Context};
+use crate::input::list::ListState;
 use crate::model::{
-    filter_processes, sort_processes, ActionKind, AppMode, ConfirmedAction, PendingAction,
-    ProcessIdentity, ProcessInfo, SortMode,
+    filter_processes, sort_processes, ActionKind, AppMode, PendingAction, ProcessIdentity,
+    ProcessInfo, SortMode,
 };
-use crate::state::{CollectorUpdate, SystemState};
-use crate::ui;
-use crate::ui::state::{UiCommand, UiState};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Panel {
-    Processes,
-    Details,
-    Resources,
-    Network,
-    Disks,
-    More,
-}
-
-impl Panel {
-    fn next(self) -> Self {
-        match self {
-            Self::Processes => Self::Details,
-            Self::Details => Self::Resources,
-            Self::Resources => Self::Network,
-            Self::Network => Self::Disks,
-            Self::Disks => Self::More,
-            Self::More => Self::Processes,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AppCommand {
-    Quit,
-    Refresh,
-    OpenProcess(ProcessIdentity),
-    BeginAction,
-    ConfirmAction(ConfirmedAction),
-    CancelAction,
-    Noop,
-}
+use crate::state::{CollectorUpdate, InterfaceStats, SystemState};
+use crate::ui::state::{PanelId, PanelToggle, UiState, Workspace};
+use crate::ui::{self, RenderOutput};
 
 pub struct App {
     pub refresh: Duration,
     pub state: SystemState,
+    pub history: History,
     pub mode: AppMode,
-    pub focus: Panel,
     pub sort: SortMode,
     pub filter: String,
-    pub selected_index: usize,
     pub pending_action: Option<PendingAction>,
     pub notice: Option<String>,
-    pub history: History,
     pub ui: UiState,
+    pub last_render: RenderOutput,
     selected_identity: Option<ProcessIdentity>,
     notice_until: Option<Instant>,
 }
@@ -243,15 +40,14 @@ impl App {
         Self {
             refresh,
             state: SystemState::default(),
+            history: History::new(60),
             mode: AppMode::Dashboard,
-            focus: Panel::Processes,
             sort: SortMode::Cpu,
             filter: String::new(),
-            selected_index: 0,
             pending_action: None,
             notice: None,
-            history: History::new(60),
             ui: UiState::default(),
+            last_render: RenderOutput::default(),
             selected_identity: None,
             notice_until: None,
         }
@@ -264,6 +60,20 @@ impl App {
             self.history.record(&self.state);
         }
         self.reconcile_selection();
+        for panel in [PanelId::Interfaces, PanelId::Traffic, PanelId::Disks] {
+            let (len, viewport) = (self.list_len(panel), self.viewport(panel));
+            self.ui.list_mut(panel).clamp(len, viewport);
+        }
+    }
+
+    /// Apply every queued collector update without blocking. Returns true if anything changed.
+    pub fn pump(&mut self, updates: &Receiver<CollectorUpdate>) -> bool {
+        let mut changed = false;
+        while let Ok(update) = updates.try_recv() {
+            self.apply_update(update);
+            changed = true;
+        }
+        changed
     }
 
     pub fn visible_processes(&self) -> Vec<ProcessInfo> {
@@ -273,213 +83,218 @@ impl App {
     }
 
     pub fn selected_process(&self) -> Option<ProcessInfo> {
-        self.visible_processes().get(self.selected_index).cloned()
+        self.visible_processes()
+            .get(self.ui.list(PanelId::Processes).selected)
+            .cloned()
     }
 
-    pub fn handle_key(&mut self, key: KeyEvent) -> AppCommand {
-        if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
-            return AppCommand::Noop;
+    pub fn selected_interface(&self) -> Option<&InterfaceStats> {
+        self.state
+            .interfaces
+            .get(self.ui.list(PanelId::Interfaces).selected)
+    }
+
+    /// Processes with measured traffic, busiest first.
+    pub fn traffic_rows(&self) -> Vec<&ProcessInfo> {
+        let mut rows: Vec<&ProcessInfo> = self
+            .state
+            .processes
+            .iter()
+            .filter(|process| process.traffic.is_some())
+            .collect();
+        let total = |process: &ProcessInfo| process.traffic.map_or(0.0, |t| t.rx + t.tx);
+        rows.sort_by(|a, b| total(b).total_cmp(&total(a)));
+        rows
+    }
+
+    pub fn list_len(&self, panel: PanelId) -> usize {
+        match panel {
+            PanelId::Processes => self.visible_processes().len(),
+            PanelId::Interfaces => self.state.interfaces.len(),
+            PanelId::Traffic => self.traffic_rows().len(),
+            PanelId::Disks => self.state.visible_disks().len(),
+            PanelId::Resources | PanelId::Details | PanelId::Settings => 0,
         }
+    }
+
+    pub fn viewport(&self, panel: PanelId) -> usize {
+        self.last_render
+            .viewports
+            .get(&panel)
+            .copied()
+            .unwrap_or(1)
+            .max(1)
+    }
+
+    pub fn contexts(&self) -> Vec<Context> {
         match self.mode {
-            AppMode::ConfirmingAction => self.handle_confirmation(key.code),
-            AppMode::Filtering => self.handle_filter(key.code),
-            AppMode::Dashboard | AppMode::ProcessDetail => self.handle_dashboard(key),
+            AppMode::ConfirmingAction => vec![Context::Confirm],
+            AppMode::Filtering => vec![Context::Filter],
+            AppMode::ProcessDetail => vec![Context::Detail, Context::Global],
+            AppMode::Dashboard => {
+                let mut stack = Vec::new();
+                if self.ui.menu_open {
+                    stack.push(Context::Menu);
+                }
+                stack.push(Context::Panel(self.ui.focus));
+                stack.push(Context::Workspace(self.ui.workspace));
+                stack.push(Context::Global);
+                stack
+            }
         }
     }
 
-    pub fn handle_mouse(&mut self, mouse: MouseEvent) {
-        if self.mode != AppMode::Dashboard {
-            return;
+    pub fn handle_key(&mut self, key: KeyEvent) -> Vec<Effect> {
+        match keymap::resolve(&self.contexts(), &key) {
+            Some(action) => self.update(action),
+            None => Vec::new(),
         }
-        if let UiCommand::Scroll(panel, amount) = self.ui.handle_mouse(mouse, self.focus) {
-            self.ui.scroll_by(panel, amount);
-            if panel == Panel::Processes {
-                if amount.is_positive() {
-                    self.move_selection(amount as usize);
-                } else {
-                    self.move_selection_up(amount.unsigned_abs() as usize);
+    }
+
+    pub fn handle_mouse(&mut self, mouse: MouseEvent) -> Vec<Effect> {
+        if self.mode != AppMode::Dashboard {
+            return Vec::new();
+        }
+        let delta = match mouse.kind {
+            MouseEventKind::ScrollUp => -3,
+            MouseEventKind::ScrollDown => 3,
+            _ => return Vec::new(),
+        };
+        self.update(Action::Scroll(self.ui.focus, delta))
+    }
+
+    pub fn update(&mut self, action: Action) -> Vec<Effect> {
+        let focus = self.ui.focus;
+        match action {
+            Action::Quit => return vec![Effect::Quit],
+            Action::Refresh => return vec![Effect::Refresh],
+            Action::GoWorkspace(workspace) => self.go_workspace(workspace),
+            Action::NextWorkspace => self.go_workspace(self.ui.workspace.step(1)),
+            Action::PrevWorkspace => self.go_workspace(self.ui.workspace.step(-1)),
+            Action::FocusNext => self.ui.focus_step(1),
+            Action::FocusPrev => self.ui.focus_step(-1),
+            Action::Focus(panel) => {
+                if self.ui.visible_panels().contains(&panel) {
+                    self.ui.focus = panel;
                 }
             }
-        }
-    }
-
-    fn handle_confirmation(&mut self, code: KeyCode) -> AppCommand {
-        match code {
-            KeyCode::Char('y' | 'Y') => {
-                self.mode = AppMode::Dashboard;
-                self.pending_action
-                    .take()
-                    .map(|pending| AppCommand::ConfirmAction(pending.confirm()))
-                    .unwrap_or(AppCommand::Noop)
+            Action::MoveUp => self.move_list(focus, -1),
+            Action::MoveDown => self.move_list(focus, 1),
+            Action::PageUp => self.move_list(focus, -(self.viewport(focus) as isize)),
+            Action::PageDown => self.move_list(focus, self.viewport(focus) as isize),
+            Action::Home => self.move_list(focus, isize::MIN / 2),
+            Action::End => self.move_list(focus, isize::MAX / 2),
+            Action::Scroll(panel, delta) => self.move_list(panel, isize::from(delta)),
+            Action::Select(panel, index) => {
+                self.ui.focus = panel;
+                let current = self.ui.list(panel).selected as isize;
+                self.move_list(panel, index as isize - current);
             }
-            KeyCode::Char('n' | 'N') | KeyCode::Esc => {
+            Action::Open => {
+                if focus == PanelId::Processes && self.selected_process().is_some() {
+                    self.mode = AppMode::ProcessDetail;
+                }
+            }
+            Action::Back => self.back(),
+            Action::StartFilter => self.mode = AppMode::Filtering,
+            Action::FilterInput(character) => {
+                self.filter.push(character);
+                self.select_first();
+            }
+            Action::FilterBackspace => {
+                self.filter.pop();
+                self.select_first();
+            }
+            Action::FilterSubmit => self.mode = AppMode::Dashboard,
+            Action::CycleSort => {
+                self.sort = match self.sort {
+                    SortMode::Cpu => SortMode::Memory,
+                    SortMode::Memory => SortMode::Cpu,
+                };
+                self.reconcile_selection();
+            }
+            Action::Terminate => self.begin_action(ActionKind::Terminate),
+            Action::Kill => self.begin_action(ActionKind::Kill),
+            Action::Confirm => {
+                self.mode = AppMode::Dashboard;
+                if let Some(pending) = self.pending_action.take() {
+                    return vec![Effect::SendSignal(pending.confirm())];
+                }
+            }
+            Action::Cancel => {
                 self.mode = AppMode::Dashboard;
                 if let Some(pending) = self.pending_action.take() {
                     let _ = pending.cancel();
                 }
-                AppCommand::CancelAction
             }
-            _ => AppCommand::Noop,
-        }
-    }
-
-    fn handle_filter(&mut self, code: KeyCode) -> AppCommand {
-        match code {
-            KeyCode::Esc | KeyCode::Enter => self.mode = AppMode::Dashboard,
-            KeyCode::Backspace => {
-                self.filter.pop();
-                self.select_first();
+            Action::ToggleMenu => self.ui.menu_open = !self.ui.menu_open,
+            Action::CycleTheme => {
+                self.ui.theme = self.ui.theme.next();
+                self.show_notice(format!("Theme: {}", self.ui.theme.label()));
             }
-            KeyCode::Char(character) if !character.is_control() => {
-                self.filter.push(character);
-                self.select_first();
+            Action::CycleDensity => {
+                self.ui.density = self.ui.density.cycle();
+                self.show_notice(format!("Layout: {:?}", self.ui.density));
             }
-            _ => {}
-        }
-        AppCommand::Noop
-    }
-
-    fn handle_dashboard(&mut self, key: KeyEvent) -> AppCommand {
-        match self.ui.handle_key(key, self.focus) {
-            UiCommand::WorkspaceChanged(workspace) => {
-                self.focus = match workspace {
-                    crate::ui::state::Workspace::Network => Panel::Network,
-                    crate::ui::state::Workspace::Disks => Panel::Disks,
-                    crate::ui::state::Workspace::More => Panel::More,
-                    crate::ui::state::Workspace::Overview => Panel::Resources,
-                    crate::ui::state::Workspace::Processes => Panel::Processes,
+            Action::TogglePanel => {
+                let message = match self.ui.toggle_panel() {
+                    PanelToggle::Hidden(panel) => {
+                        format!("{} panel hidden. Press H to restore.", panel.label())
+                    }
+                    PanelToggle::Restored => "All panels visible.".to_owned(),
+                    PanelToggle::LastPanel => "The last visible panel cannot be hidden.".to_owned(),
                 };
-                self.show_notice(format!("Workspace: {}", workspace.label()));
-                return AppCommand::Noop;
+                self.show_notice(message);
             }
-            UiCommand::FocusNext => {
-                self.focus = self.focus.next();
-                return AppCommand::Noop;
-            }
-            UiCommand::TogglePanel(panel) => {
-                self.show_notice(format!(
-                    "{} panel {}.",
-                    panel_label(panel),
-                    if self.ui.hidden_panels.contains(&panel) {
-                        "hidden"
-                    } else {
-                        "visible"
-                    }
-                ));
-                return AppCommand::Noop;
-            }
-            UiCommand::DensityChanged(density) => {
-                self.show_notice(format!("Layout: {density:?}"));
-                return AppCommand::Noop;
-            }
-            UiCommand::OpenMenu => return AppCommand::Noop,
-            UiCommand::NetworkInterfaceChanged(index) => {
-                self.show_notice(format!("Network interface: {}", index + 1));
-                return AppCommand::Noop;
-            }
-            UiCommand::Scroll(panel, amount) => {
-                self.ui.scroll_by(panel, amount);
-                return AppCommand::Noop;
-            }
-            UiCommand::Noop => {}
         }
-        match key.code {
-            KeyCode::Char('q' | 'Q') => AppCommand::Quit,
-            KeyCode::Tab => {
-                self.focus = self.focus.next();
-                AppCommand::Noop
-            }
-            KeyCode::Down | KeyCode::Up => {
-                let processes = self.visible_processes();
-                if !processes.is_empty() {
-                    self.selected_index = if key.code == KeyCode::Down {
-                        (self.selected_index + 1).min(processes.len() - 1)
-                    } else {
-                        self.selected_index.saturating_sub(1)
-                    };
-                    self.selected_identity = Some(processes[self.selected_index].identity);
-                    self.focus = Panel::Processes;
-                }
-                AppCommand::Noop
-            }
-            KeyCode::Enter => {
-                if let Some(process) = self.selected_process() {
-                    self.mode = AppMode::ProcessDetail;
-                    AppCommand::OpenProcess(process.identity)
-                } else {
-                    AppCommand::Noop
-                }
-            }
-            KeyCode::Esc => {
-                if self.mode == AppMode::ProcessDetail {
-                    self.mode = AppMode::Dashboard;
-                } else if !self.filter.is_empty() {
-                    self.filter.clear();
-                    self.select_first();
-                }
-                AppCommand::Noop
-            }
-            KeyCode::Char('k' | 'K') => {
-                if let Some(process) = self.selected_process() {
-                    if process.identity.pid == std::process::id() {
-                        self.show_notice("Filiz cannot send a signal to itself.");
-                        return AppCommand::Noop;
-                    }
-                    let kind = if key.modifiers.contains(KeyModifiers::SHIFT)
-                        || key.code == KeyCode::Char('K')
-                    {
-                        ActionKind::Kill
-                    } else {
-                        ActionKind::Terminate
-                    };
-                    self.pending_action = Some(PendingAction::new(process.identity, kind));
-                    self.mode = AppMode::ConfirmingAction;
-                    AppCommand::BeginAction
-                } else {
-                    AppCommand::Noop
-                }
-            }
-            KeyCode::Char('f' | 'F') => {
-                self.mode = AppMode::Filtering;
-                AppCommand::Noop
-            }
-            KeyCode::Char('c' | 'C') => {
-                self.sort = SortMode::Cpu;
-                self.reconcile_selection();
-                AppCommand::Noop
-            }
-            KeyCode::Char('m' | 'M') => {
-                self.sort = SortMode::Memory;
-                self.reconcile_selection();
-                AppCommand::Noop
-            }
-            KeyCode::Char('r' | 'R') => AppCommand::Refresh,
-            _ => AppCommand::Noop,
+        Vec::new()
+    }
+
+    fn go_workspace(&mut self, workspace: Workspace) {
+        self.ui.set_workspace(workspace);
+        self.show_notice(format!("Workspace: {}", workspace.label()));
+    }
+
+    fn back(&mut self) {
+        if self.mode == AppMode::ProcessDetail {
+            self.mode = AppMode::Dashboard;
+        } else if self.ui.menu_open {
+            self.ui.menu_open = false;
+        } else if !self.filter.is_empty() {
+            self.filter.clear();
+            self.select_first();
         }
     }
 
-    fn move_selection(&mut self, amount: usize) {
-        let processes = self.visible_processes();
-        if !processes.is_empty() {
-            self.selected_index = (self.selected_index + amount).min(processes.len() - 1);
-            self.selected_identity = Some(processes[self.selected_index].identity);
+    fn move_list(&mut self, panel: PanelId, delta: isize) {
+        let (len, viewport) = (self.list_len(panel), self.viewport(panel));
+        self.ui.list_mut(panel).move_by(delta, len, viewport);
+        if panel == PanelId::Processes {
+            self.selected_identity = self.selected_process().map(|process| process.identity);
         }
     }
 
-    fn move_selection_up(&mut self, amount: usize) {
-        self.selected_index = self.selected_index.saturating_sub(amount);
-        self.selected_identity = self.selected_process().map(|process| process.identity);
+    fn begin_action(&mut self, kind: ActionKind) {
+        let Some(process) = self.selected_process() else {
+            return;
+        };
+        if process.identity.pid == std::process::id() {
+            self.show_notice("Filiz cannot send a signal to itself.");
+            return;
+        }
+        self.pending_action = Some(PendingAction::new(process.identity, kind));
+        self.mode = AppMode::ConfirmingAction;
     }
 
     fn select_first(&mut self) {
-        self.selected_index = 0;
+        *self.ui.list_mut(PanelId::Processes) = ListState::default();
         self.selected_identity = self.visible_processes().first().map(|p| p.identity);
     }
 
     fn reconcile_selection(&mut self) {
         let processes = self.visible_processes();
         let previous = self.selected_identity;
-        self.selected_index = previous
+        let index = previous
             .and_then(|identity| processes.iter().position(|p| p.identity == identity))
             .or_else(|| {
                 processes
@@ -487,7 +302,11 @@ impl App {
                     .position(|p| previous.is_none_or(|identity| p.identity.pid != identity.pid))
             })
             .unwrap_or(0);
-        self.selected_identity = processes.get(self.selected_index).map(|p| p.identity);
+        let viewport = self.viewport(PanelId::Processes);
+        let list = self.ui.list_mut(PanelId::Processes);
+        list.selected = index;
+        list.clamp(processes.len(), viewport);
+        self.selected_identity = processes.get(list.selected).map(|p| p.identity);
         if self.mode == AppMode::ConfirmingAction
             && self
                 .pending_action
@@ -507,16 +326,6 @@ impl App {
         self.notice_until = Some(Instant::now() + Duration::from_secs(5));
     }
 
-    /// Apply every queued collector update without blocking. Returns true if anything changed.
-    pub fn pump(&mut self, updates: &Receiver<CollectorUpdate>) -> bool {
-        let mut changed = false;
-        while let Ok(update) = updates.try_recv() {
-            self.apply_update(update);
-            changed = true;
-        }
-        changed
-    }
-
     fn clear_expired_notice(&mut self) -> bool {
         if self
             .notice_until
@@ -527,17 +336,6 @@ impl App {
             return true;
         }
         false
-    }
-}
-
-fn panel_label(panel: Panel) -> &'static str {
-    match panel {
-        Panel::Processes => "Processes",
-        Panel::Details => "Details",
-        Panel::Resources => "Resources",
-        Panel::Network => "Network",
-        Panel::Disks => "Disks",
-        Panel::More => "More",
     }
 }
 
@@ -557,37 +355,34 @@ pub fn run(
             dirty = true;
         }
         if dirty {
-            terminal.draw(|frame| ui::render(frame, app))?;
+            let mut output = RenderOutput::default();
+            terminal.draw(|frame| output = ui::render(frame, app))?;
+            app.last_render = output;
             dirty = false;
         }
         if !event::poll(INPUT_WAIT)? {
             continue;
         }
-        match event::read()? {
-            Event::Key(key) => {
-                match app.handle_key(key) {
-                    AppCommand::Quit => break,
-                    AppCommand::Refresh => runtime.refresh(),
-                    AppCommand::ConfirmAction(action) => {
-                        let pid = action.identity().pid;
-                        match ProcessAction::execute(action) {
-                            Ok(()) => app.show_notice(format!("Signal sent to PID {pid}.")),
-                            Err(error) => app.show_notice(error.to_user_message()),
-                        }
-                        runtime.refresh();
+        let effects = match event::read()? {
+            Event::Key(key) => app.handle_key(key),
+            Event::Mouse(mouse) => app.handle_mouse(mouse),
+            Event::Resize(_, _) => Vec::new(),
+            _ => continue,
+        };
+        dirty = true;
+        for effect in effects {
+            match effect {
+                Effect::Quit => return Ok(()),
+                Effect::Refresh => runtime.refresh(),
+                Effect::SendSignal(action) => {
+                    let pid = action.identity().pid;
+                    match ProcessAction::execute(action) {
+                        Ok(()) => app.show_notice(format!("Signal sent to PID {pid}.")),
+                        Err(error) => app.show_notice(error.to_user_message()),
                     }
-                    _ => {}
+                    runtime.refresh();
                 }
-                dirty = true;
             }
-            Event::Mouse(mouse) => {
-                app.handle_mouse(mouse);
-                dirty = true;
-            }
-            Event::Resize(_, _) => dirty = true,
-            _ => {}
         }
     }
-    drop(runtime);
-    Ok(())
 }

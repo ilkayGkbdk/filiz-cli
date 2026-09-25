@@ -6,7 +6,7 @@ use filiz::model::{ProcessIdentity, ProcessInfo};
 use filiz::state::{CollectorUpdate, DiskStats, InterfaceStats, MemoryStats, SystemSample};
 use filiz::ui::{
     render,
-    state::{LayoutDensity, UiCommand, UiState, Workspace},
+    state::{PanelId, Workspace},
 };
 use ratatui::{backend::TestBackend, Terminal};
 
@@ -56,7 +56,11 @@ fn sample_app() -> App {
 
 fn screen(app: &App, width: u16, height: u16) -> String {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-    terminal.draw(|frame| render(frame, app)).unwrap();
+    terminal
+        .draw(|frame| {
+            render(frame, app);
+        })
+        .unwrap();
     terminal
         .backend()
         .buffer()
@@ -87,6 +91,7 @@ fn dashboard_renders_without_panic_when_compact() {
     let output = screen(&sample_app(), 48, 20);
     assert!(output.contains("FILIZ"));
     assert!(output.contains("PROCESSES"));
+    assert!(output.contains("QUIT"));
     let _ = screen(&sample_app(), 20, 8);
 }
 
@@ -101,36 +106,26 @@ fn confirmation_modal_is_rendered_for_selected_process() {
 }
 
 #[test]
-fn navigation_switches_workspaces_and_cycles_density() {
-    let mut state = UiState::default();
-    let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
-    assert_eq!(
-        state.handle_key(key(KeyCode::Char('3')), filiz::app::Panel::Processes),
-        UiCommand::WorkspaceChanged(Workspace::Network)
-    );
-    assert_eq!(state.workspace, Workspace::Network);
-    assert_eq!(
-        state.handle_key(key(KeyCode::Char('l')), filiz::app::Panel::Processes),
-        UiCommand::DensityChanged(LayoutDensity::Spacious)
-    );
-    assert_eq!(state.density, LayoutDensity::Spacious);
+fn footer_shows_only_keys_of_the_active_context() {
+    let mut app = sample_app();
+    let processes = screen(&app, 110, 35);
+    assert!(processes.contains("FILTER"));
+    app.ui.set_workspace(Workspace::Network);
+    let network = screen(&app, 110, 35);
+    assert!(!network.contains("FILTER"));
+    assert!(network.contains("QUIT"));
+    app.handle_key(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE));
+    app.ui.focus = PanelId::Interfaces;
+    app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
+    assert!(app.pending_action.is_none());
 }
 
 #[test]
-fn panel_toggle_and_scroll_are_scoped_to_the_focused_panel() {
-    let mut state = UiState::default();
-    let key = KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE);
-    assert_eq!(
-        state.handle_key(key, filiz::app::Panel::Processes),
-        UiCommand::TogglePanel(filiz::app::Panel::Processes)
-    );
-    assert!(state.hidden_panels.contains(&filiz::app::Panel::Processes));
-    state.scroll_by(filiz::app::Panel::Processes, 6);
-    assert_eq!(
-        state.scroll_offsets.get(&filiz::app::Panel::Processes),
-        Some(&6)
-    );
-    assert_eq!(state.scroll_offsets.get(&filiz::app::Panel::Details), None);
+fn sort_column_is_marked() {
+    let mut app = sample_app();
+    assert!(screen(&app, 110, 35).contains("CPU ▼"));
+    app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
+    assert!(screen(&app, 110, 35).contains("MEMORY ▼"));
 }
 
 #[test]
