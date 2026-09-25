@@ -97,6 +97,13 @@ pub struct MacOsMetrics {
     pub warnings: Vec<CollectorWarning>,
 }
 
+/// Per-process network throughput in bytes per second.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TrafficRate {
+    pub rx: f64,
+    pub tx: f64,
+}
+
 /// Process data captured during one collection cycle.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProcessInfo {
@@ -107,6 +114,7 @@ pub struct ProcessInfo {
     pub memory_bytes: Option<u64>,
     pub user: Option<String>,
     pub status: Option<String>,
+    pub traffic: Option<TrafficRate>,
 }
 
 /// An event suitable for display in the recent-events panel.

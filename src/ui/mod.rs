@@ -136,6 +136,7 @@ mod tests {
                 memory_bytes: Some(1024 * 1024),
                 user: Some("user".into()),
                 status: Some("Running".into()),
+                traffic: None,
             }],
             network_summaries: Vec::new(),
             events: Vec::new(),

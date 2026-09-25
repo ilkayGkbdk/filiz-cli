@@ -73,6 +73,7 @@ impl Collector for ProcessCollector {
                 memory_bytes: Some(process.memory()),
                 user,
                 status: Some(process.status().to_string()),
+                traffic: None,
             });
             current_processes.insert(identity);
         }

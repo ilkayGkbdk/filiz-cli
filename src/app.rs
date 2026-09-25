@@ -20,6 +20,7 @@ mod tests {
             memory_bytes: Some(u64::from(pid) * 1024),
             user: None,
             status: None,
+            traffic: None,
         }
     }
 

@@ -22,6 +22,7 @@ fn process(
         memory_bytes: Some(memory_bytes),
         user: None,
         status: None,
+        traffic: None,
     }
 }
 
